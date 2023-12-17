@@ -15,9 +15,10 @@ pub(crate) fn init_tracing_to_file() {
     let filer = ta::rolling::Builder::new();
     let filer = filer.rotation(ta::rolling::Rotation::HOURLY);
     let filer = filer.filename_prefix(format!(
-        "{}-version-{}-built-{}-log-for-",
+        "{}-version-{}-built-{}-commit-{}-log-for-",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
-        build_time_local!("%Y-%b-%d-%r-%s")
+        build_time_local!("%Y-%b-%d-%r-%s"),
+        env!("GIT_HASH"),
     ));
 }

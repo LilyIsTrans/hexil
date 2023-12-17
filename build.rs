@@ -4,11 +4,15 @@ fn main() {
     let head_hash = Command::new("git")
         .args(&["rev-parse", "HEAD"])
         .output()
-        .expect("Failed to hash HEAD");
+        .expect("Failed to hash HEAD!");
     let result = Command::new("git")
-        .args(&["rev-parse", head_hash])
-        .status()
-        .expect("Failed to check for commit hash!");
-    let git_hash = String::from_utf8(output.stdout).unwrap();
+        .args(&["status", "-s"])
+        .output()
+        .expect("Failed to check status!");
+    let git_hash = if result.stdout.is_empty() {
+        String::from_utf8(head_hash.stdout).unwrap()
+    } else {
+        "Unsaved Commit".to_owned()
+    };
     println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 }
