@@ -1,6 +1,7 @@
+mod logging;
 mod render;
 mod window;
 
 fn main() {
-    println!("Hello, world!");
+    logging::init_log_compat_layer();
 }
