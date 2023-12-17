@@ -7,3 +7,11 @@ authors = ["Lily McCabe <lily@lilymccabe.ca"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+palette = { version = "0.7.3", default-features = false, features = ["std", "serializing"] }
+tokio = { version = "1.35.0", features = ["tracing", "io-util", "macros", "sync", "fs", "full"] }
+tracing = { version = "0.1.40", features = ["async-await"] }
+tracing-appender = { version = "0.2.3", features = ["parking_lot"] }
+tracing-log = "0.2.0"
+tracing-timing = "0.6.0"
+wgpu = "0.18.0"
+winit = { version = "0.29.4", features = ["serde"] }
