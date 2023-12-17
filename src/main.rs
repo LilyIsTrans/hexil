@@ -3,5 +3,5 @@ mod render;
 mod window;
 
 fn main() {
-    logging::init_log_compat_layer();
+    let _guard = logging::init_tracing_to_file();
 }
