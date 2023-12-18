@@ -18,7 +18,7 @@ pub(crate) fn init_tracing_to_file() -> WorkerGuard {
     ));
     let filer_verbose = filer_verbose.filename_suffix("log.verbose");
     let filer_verbose = filer_verbose.max_log_files(20);
-    let filer_verbose = filer_verbose.build("log").unwrap();
+    let filer_verbose = filer_verbose.build("logs").unwrap();
 
     // let filer_terse = ta::rolling::Builder::new();
     // let filer_terse = filer_terse.rotation(ta::rolling::Rotation::HOURLY);
