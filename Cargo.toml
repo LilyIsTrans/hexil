@@ -6,6 +6,13 @@ authors = ["Lily McCabe <lily@lilymccabe.ca"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+wayland = []
+x11 = []
+win32 = []
+metal = []
+
+
 [dependencies]
 build-time = "0.1.3"
 palette = { version = "0.7.3", default-features = false, features = ["std", "serializing"] }
@@ -17,4 +24,4 @@ tracing-appender = { version = "0.2.3", features = ["parking_lot"] }
 tracing-log = "0.2.0"
 tracing-subscriber = { version = "0.3.18", features = ["parking_lot", "tracing", "tracing-serde"] }
 vulkano = { version = "0.34.1", features = ["serde", "document_unchecked"] }
-winit = { version = "0.29.4", features = ["serde"] }
+winit = { version = "0.29.4", features = ["serde", "rwh_05"] }
