@@ -56,7 +56,7 @@ pub fn make_window(title: &str, eloop: &EventLoop<WindowCommand>) -> Result<Wind
 #[instrument]
 pub fn run_event_loop(
     eloop: EventLoop<WindowCommand>,
-    render_handle: tokio::sync::mpsc::Sender<RenderCommand>,
+    render_handle: std::sync::mpsc::Sender<RenderCommand>,
 ) -> Result<(), EventLoopError> {
     eloop.run(|event, window_target| match event {
         Event::WindowEvent {
@@ -64,20 +64,16 @@ pub fn run_event_loop(
             event,
         } => match event {
             event::WindowEvent::Resized(new_size) => {
-                let hand = render_handle.clone();
-                tokio::spawn(async move {
-                    hand.send(RenderCommand::WindowResized(new_size.into()))
-                        .await
-                });
+                render_handle.send(RenderCommand::WindowResized(new_size.into()));
             }
             event::WindowEvent::CloseRequested => {
                 info!("Closing window!");
-                let _ = render_handle.blocking_send(RenderCommand::Shutdown);
+                let _ = render_handle.send(RenderCommand::Shutdown);
                 window_target.exit();
             }
             event::WindowEvent::Destroyed => {
                 warn!("Window destroyed!!");
-                let _ = render_handle.blocking_send(RenderCommand::Shutdown);
+                let _ = render_handle.send(RenderCommand::Shutdown);
                 window_target.exit();
             }
             _ => (),

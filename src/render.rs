@@ -1,4 +1,3 @@
-use palette::chromatic_adaptation::AdaptInto;
 use std::sync::Arc;
 use tracing::{error, info_span, instrument};
 
@@ -65,9 +64,9 @@ pub enum RenderCommand {
 }
 
 #[instrument]
-pub async fn render_thread(
+pub fn render_thread(
     window: Arc<Window>,
-    mut render_command_channel: tokio::sync::mpsc::Receiver<RenderCommand>,
+    mut render_command_channel: std::sync::mpsc::Receiver<RenderCommand>,
 ) -> Result<(), RendererError> {
     let renderer = Renderer::initialize(window);
     if let Err(e) = renderer {
@@ -85,10 +84,10 @@ pub async fn render_thread(
 
     renderer.window.set_visible(true);
     loop {
-        match render_command_channel.recv().await {
-            None => return Ok(()),
-            Some(RenderCommand::WindowResized(new_size)) => renderer.make_swapchain(new_size)?,
-            Some(RenderCommand::Shutdown) => return Ok(()),
+        match render_command_channel.recv() {
+            Err(e) => return Ok(()),
+            Ok(RenderCommand::WindowResized(new_size)) => renderer.make_swapchain(new_size)?,
+            Ok(RenderCommand::Shutdown) => return Ok(()),
         }
     }
 }
@@ -298,9 +297,17 @@ impl Renderer {
     }
 
     fn make_swapchain(&mut self, new_size: [u32; 2]) -> Result<(), RendererError> {
-        let new_size: [u32; 2] = self.window.inner_size().into();
         if new_size == [0u32, 0u32] {
             self.swapchain = None;
+        } else if self
+            .swapchain
+            .as_ref()
+            .is_some_and(|swapchain| swapchain.0.image_extent() == new_size)
+        {
+        } else if let Some(swapchain) = self.swapchain.clone() {
+            let mut create_info = swapchain.0.create_info();
+            create_info.image_extent = new_size;
+            self.swapchain = Some(swapchain.0.recreate(create_info)?);
         } else {
             let swapchain = vk::swapchain::SwapchainCreateInfo {
                 image_format: Default::default(),
