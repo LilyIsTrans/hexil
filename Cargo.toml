@@ -6,12 +6,6 @@ authors = ["Lily McCabe <lily@lilymccabe.ca"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[features]
-wayland = []
-x11 = []
-win32 = []
-metal = []
-
 
 [dependencies]
 build-time = "0.1.3"
