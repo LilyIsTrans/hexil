@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{mpsc::RecvError, Arc};
 use tracing::{error, info_span, instrument};
 
 use thiserror::Error;
@@ -19,6 +19,14 @@ pub enum RendererError {
     WindowHandleError(winit::raw_window_handle::HandleError),
     #[error("No physical devices? At all!? Seriously, as far as this program can tell, you must be reading this through a serial port, which like, props, but what on earth made you think a pixel art program would work with that?")]
     NoPhysicalDevices,
+    #[error("{0}")]
+    ChannelError(RecvError),
+}
+
+impl From<RecvError> for RendererError {
+    fn from(v: RecvError) -> Self {
+        Self::ChannelError(v)
+    }
 }
 
 impl From<winit::raw_window_handle::HandleError> for RendererError {
@@ -66,7 +74,7 @@ pub enum RenderCommand {
 #[instrument]
 pub fn render_thread(
     window: Arc<Window>,
-    mut render_command_channel: std::sync::mpsc::Receiver<RenderCommand>,
+    render_command_channel: std::sync::mpsc::Receiver<RenderCommand>,
 ) -> Result<(), RendererError> {
     let renderer = Renderer::initialize(window);
     if let Err(e) = renderer {
@@ -85,7 +93,10 @@ pub fn render_thread(
     renderer.window.set_visible(true);
     loop {
         match render_command_channel.recv() {
-            Err(e) => return Ok(()),
+            Err(e) => {
+                error!("Inter-thread communication failure! {}", e);
+                return Err(e.into());
+            }
             Ok(RenderCommand::WindowResized(new_size)) => renderer.make_swapchain(new_size)?,
             Ok(RenderCommand::Shutdown) => return Ok(()),
         }
@@ -226,10 +237,6 @@ impl Renderer {
                     khr_present_id: true,
                     khr_present_wait: true,
                     khr_push_descriptor: true,
-                    khr_ray_query: true,
-                    khr_ray_tracing_maintenance1: true,
-                    khr_ray_tracing_pipeline: true,
-                    khr_ray_tracing_position_fetch: true,
                     khr_relaxed_block_layout: true,
                     khr_sampler_mirror_clamp_to_edge: true,
                     khr_sampler_ycbcr_conversion: true,
@@ -253,11 +260,6 @@ impl Renderer {
                     khr_timeline_semaphore: true,
                     khr_uniform_buffer_standard_layout: true,
                     khr_variable_pointers: true,
-                    khr_video_decode_h264: true,
-                    khr_video_decode_h265: true,
-                    khr_video_decode_queue: true,
-                    khr_video_encode_queue: true,
-                    khr_video_queue: true,
                     khr_vulkan_memory_model: true,
                     khr_win32_keyed_mutex: true,
                     khr_workgroup_memory_explicit_layout: true,
