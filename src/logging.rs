@@ -11,9 +11,11 @@ pub(crate) fn init_tracing_to_file() -> WorkerGuard {
     let filer_verbose = ta::rolling::Builder::new();
     let filer_verbose = filer_verbose.rotation(ta::rolling::Rotation::HOURLY);
     let filer_verbose = filer_verbose.filename_prefix(format!(
-        "{}-version-{}-built-{}-commit-{}-logged-at-",
+        "{}_version_{}_{}_{}_built_{}_commit_{}_logged_at_",
         env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION"),
+        env!("CARGO_PKG_VERSION_MAJOR"),
+        env!("CARGO_PKG_VERSION_MINOR"),
+        env!("CARGO_PKG_VERSION_PATCH"),
         build_time_local!("%Y-%b-%d-%r-%s"),
         env!("GIT_HASH"),
     ));
