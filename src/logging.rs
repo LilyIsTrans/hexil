@@ -1,5 +1,6 @@
 use build_time::build_time_local;
 use tracing::error;
+use tracing::info;
 use tracing::instrument;
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::filter::LevelFilter;
@@ -10,15 +11,7 @@ pub(crate) fn init_tracing_to_file() -> WorkerGuard {
     use tracing_appender as ta;
     let filer_verbose = ta::rolling::Builder::new();
     let filer_verbose = filer_verbose.rotation(ta::rolling::Rotation::HOURLY);
-    let filer_verbose = filer_verbose.filename_prefix(format!(
-        "{}_version_{}_{}_{}_built_{}_commit_{}_logged_at_",
-        env!("CARGO_PKG_NAME"),
-        env!("CARGO_PKG_VERSION_MAJOR"),
-        env!("CARGO_PKG_VERSION_MINOR"),
-        env!("CARGO_PKG_VERSION_PATCH"),
-        build_time_local!("%Y-%b-%d-%r-%s"),
-        env!("GIT_HASH"),
-    ));
+    let filer_verbose = filer_verbose.filename_prefix(format!("{}", env!("CARGO_PKG_NAME")));
     let filer_verbose = filer_verbose.filename_suffix("log.verbose");
     let filer_verbose = filer_verbose.max_log_files(20);
     let filer_verbose = filer_verbose.build("logs").unwrap();
@@ -47,5 +40,9 @@ pub(crate) fn init_tracing_to_file() -> WorkerGuard {
     let sub = sub.pretty();
     let sub = sub.with_writer(ace_writer);
     sub.init();
+    info!("Hexil Version: {}", env!("CARGO_PKG_VERSION"));
+    info!("Built: {}", build_time_local!("%Y-%b-%d-%r-%s"));
+    info!("Commit: {}", env!("GIT_HASH"));
+
     guard
 }
