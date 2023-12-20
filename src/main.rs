@@ -19,6 +19,5 @@ fn main() {
     let (render_command_sender, render_rec) = tokio::sync::mpsc::channel::<RenderCommand>(100);
     let render_thread = tok.spawn(render_thread(window.clone(), render_rec));
     let eprox = eloop.create_proxy();
-
-    run_event_loop(eloop).unwrap();
+    run_event_loop(eloop, render_command_sender.clone()).unwrap();
 }

@@ -1,11 +1,16 @@
 use thiserror::Error;
+use tracing::error;
+use tracing::info;
 use tracing::instrument;
+use tracing::warn;
 use winit::error::EventLoopError;
 use winit::error::OsError;
 use winit::event;
 use winit::event::Event;
 use winit::event_loop::EventLoop;
 use winit::window::Window;
+
+use crate::render::RenderCommand;
 
 #[derive(Debug, Error)]
 pub enum WindowingError {
@@ -43,56 +48,38 @@ pub fn make_window(title: &str, eloop: &EventLoop<WindowCommand>) -> Result<Wind
         .with_title(title)
         .with_visible(false)
         .with_theme(Some(winit::window::Theme::Dark))
+        .with_resizable(true)
         .build(eloop)
 }
 
 /// If this function returns, the event loop is dead. Ok(()) means it closed gracefully.
 #[instrument]
-pub fn run_event_loop(eloop: EventLoop<WindowCommand>) -> Result<(), EventLoopError> {
+pub fn run_event_loop(
+    eloop: EventLoop<WindowCommand>,
+    render_handle: tokio::sync::mpsc::Sender<RenderCommand>,
+) -> Result<(), EventLoopError> {
     eloop.run(|event, window_target| match event {
-        Event::WindowEvent { window_id, event } => match event {
-            event::WindowEvent::Resized(_) => todo!(),
-            event::WindowEvent::Moved(_) => todo!(),
-            event::WindowEvent::CloseRequested => todo!(),
-            event::WindowEvent::Destroyed => todo!(),
-            event::WindowEvent::DroppedFile(_) => todo!(),
-            event::WindowEvent::Focused(_) => todo!(),
-            event::WindowEvent::KeyboardInput {
-                device_id,
-                event,
-                is_synthetic,
-            } => todo!(),
-            event::WindowEvent::ModifiersChanged(_) => todo!(),
-            event::WindowEvent::CursorMoved {
-                device_id,
-                position,
-            } => todo!(),
-            event::WindowEvent::CursorEntered { device_id } => todo!(),
-            event::WindowEvent::CursorLeft { device_id } => todo!(),
-            event::WindowEvent::MouseWheel {
-                device_id,
-                delta,
-                phase,
-            } => todo!(),
-            event::WindowEvent::MouseInput {
-                device_id,
-                state,
-                button,
-            } => todo!(),
-            event::WindowEvent::TouchpadMagnify {
-                device_id,
-                delta,
-                phase,
-            } => todo!(),
-            event::WindowEvent::SmartMagnify { device_id } => todo!(),
-            event::WindowEvent::Touch(_) => todo!(),
-            event::WindowEvent::ScaleFactorChanged {
-                scale_factor,
-                inner_size_writer,
-            } => todo!(),
-            event::WindowEvent::ThemeChanged(_) => todo!(),
-            event::WindowEvent::Occluded(_) => todo!(),
-            event::WindowEvent::RedrawRequested => todo!(),
+        Event::WindowEvent {
+            window_id: _,
+            event,
+        } => match event {
+            event::WindowEvent::Resized(new_size) => {
+                let hand = render_handle.clone();
+                tokio::spawn(async move {
+                    hand.send(RenderCommand::WindowResized(new_size.into()))
+                        .await
+                });
+            }
+            event::WindowEvent::CloseRequested => {
+                info!("Closing window!");
+                let _ = render_handle.blocking_send(RenderCommand::Shutdown);
+                window_target.exit();
+            }
+            event::WindowEvent::Destroyed => {
+                warn!("Window destroyed!!");
+                let _ = render_handle.blocking_send(RenderCommand::Shutdown);
+                window_target.exit();
+            }
             _ => (),
         },
         Event::UserEvent(_) => (),

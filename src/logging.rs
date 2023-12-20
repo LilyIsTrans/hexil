@@ -2,6 +2,7 @@ use build_time::build_time_local;
 use tracing::error;
 use tracing::instrument;
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::prelude::*;
 
