@@ -7,6 +7,8 @@ use vk::{swapchain::Surface, VulkanLibrary};
 use vulkano as vk;
 use winit::window::Window;
 
+mod canvas_bufs;
+
 #[derive(Error, Debug)]
 pub enum RendererError {
     #[error("{0}")]

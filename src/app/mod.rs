@@ -1,18 +1,24 @@
 use std::sync::Arc;
 
-use crate::render::RenderCommand;
-use crate::window::WindowCommand;
-use parking_lot::RwLock;
 use vulkano::buffer as buf;
 use vulkano::shader as sha;
-use winit::dpi::LogicalPosition;
-use winit::dpi::LogicalSize;
-use winit::event_loop::EventLoopProxy;
-use winit::window::Window;
+
+/// The current latest project type.
+pub type Project = ProjectV1;
 
 /// Contains the state of a single instance of Hexil. It probably doesn't make sense to ever have more than one of these.
-pub struct AppInstance {}
+pub struct AppInstance {
+    /// The open tabs. For now, should always have exactly 1 element.
+    tabs: Arc<Vec<Project>>,
+    /// Channel to send commands to the renderer
+    render_channel: std::sync::mpsc::Sender<crate::render::RenderCommand>,
+    /// Event Loop Proxy to send commands to the windower
+    window_channel: winit::event_loop::EventLoopProxy<crate::window::WindowCommand>,
+    /// Handle to the render thread
+    render_thread: std::thread::JoinHandle<Result<(), crate::render::RendererError>>,
+}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// The type of grid associated with a project
 pub enum GridType {
     Square,
@@ -33,15 +39,16 @@ pub struct ProjectV1 {
     gridtype: GridType,
 }
 
+#[derive(Debug, Clone)]
 /// A canvas for a `ProjectV1` layer
 pub enum LayerV1Canvas {
+    /// A canvas of alpha blending values.
+    Alpha(Arc<[f64]>),
     /// A canvas of base colours, with an associated palette.
     BaseColour {
         palette: Arc<Vec<palette::Oklab>>,
         canvas: Arc<[usize]>,
     },
-    /// A canvas of alpha blending values.
-    Alpha(Arc<[f64]>),
     /// A canvas of shading steps (positive: brighten, negative: darken)
     Shading(Arc<[i32]>),
 }
