@@ -3,7 +3,7 @@ use tracing::{error, info_span, instrument};
 
 use thiserror::Error;
 use tracing::info;
-use vk::{swapchain::Surface, VulkanLibrary};
+use vk::{device::Features, swapchain::Surface, VulkanLibrary};
 use vulkano as vk;
 use winit::window::Window;
 
@@ -184,8 +184,24 @@ impl Renderer {
             physical_device.properties().device_name
         );
 
+        let graphics_queue_flags = vk::device::QueueFlags::GRAPHICS;
+        let transfer_queue_flags = vk::device::QueueFlags::TRANSFER;
+        let both = graphics_queue_flags.union(transfer_queue_flags);
+        let queue_family_indices = physical_device
+            .queue_family_properties()
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.queue_flags.intersects(both));
+
+        let (graphics_queue_family, transfer_queue_family) = {};
+
+        let graphics_queue_create_info = vk::device::QueueCreateInfo {
+            queue_family_index: todo!(),
+            queues: todo!(),
+            ..Default::default()
+        };
+
         let queue_create_info = vk::device::QueueCreateInfo {
-            flags: vk::device::QueueCreateFlags::empty(),
             ..Default::default()
         };
 
@@ -269,6 +285,10 @@ impl Renderer {
                     ..Default::default()
                 },
             ),
+            enabled_features: Features {
+                triangle_fans: true,
+                ..Default::default()
+            },
             ..Default::default()
         };
 

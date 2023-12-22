@@ -1,7 +1,6 @@
 use vkbuf::BufferContents;
 use vulkano::buffer as vkbuf;
 use vulkano::pipeline::graphics::vertex_input::Vertex;
-
 #[derive(Debug, Clone, Copy, BufferContents, Vertex)]
 #[repr(C)]
 pub struct Position {
