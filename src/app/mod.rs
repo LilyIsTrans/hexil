@@ -1,7 +1,5 @@
+#![allow(dead_code)]
 use std::sync::Arc;
-
-use vulkano::buffer as buf;
-use vulkano::shader as sha;
 
 /// The current latest project type.
 pub type Project = ProjectV1;

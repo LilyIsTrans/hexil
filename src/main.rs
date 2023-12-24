@@ -1,7 +1,9 @@
-mod app;
-mod logging;
-mod render;
-mod window;
+#![windows_subsystem = "windows"]
+
+use hexil::app;
+use hexil::logging;
+use hexil::render;
+use hexil::window;
 
 fn main() {
     use render::*;

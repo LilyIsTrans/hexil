@@ -1,13 +1,12 @@
 use build_time::build_time_local;
-use tracing::error;
-use tracing::info;
-use tracing::instrument;
-use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::prelude::*;
 
-pub(crate) fn init_tracing_to_file() -> WorkerGuard {
+use tracing::info;
+
+use tracing_appender::non_blocking::WorkerGuard;
+
+use tracing_subscriber::fmt::format::FmtSpan;
+
+pub fn init_tracing_to_file() -> WorkerGuard {
     use tracing_appender as ta;
     let filer_verbose = ta::rolling::Builder::new();
     let filer_verbose = filer_verbose.rotation(ta::rolling::Rotation::HOURLY);

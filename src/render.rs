@@ -1,13 +1,20 @@
 use std::sync::{mpsc::RecvError, Arc};
-use tracing::{error, info_span, instrument};
+use tracing::{error, instrument, warn};
 
 use thiserror::Error;
 use tracing::info;
-use vk::{device::Features, swapchain::Surface, VulkanLibrary};
+use vk::{
+    command_buffer::PrimaryCommandBufferAbstract, memory::allocator::MemoryAllocator,
+    sync::GpuFuture, VulkanLibrary,
+};
 use vulkano as vk;
 use winit::window::Window;
 
 mod canvas_bufs;
+mod consts;
+use crate::render::canvas_bufs::{Position, HEXAGON, HEXAGON_IDX, SQUARE, SQUARE_IDX};
+
+use self::consts::*;
 
 #[derive(Error, Debug)]
 pub enum RendererError {
@@ -18,11 +25,39 @@ pub enum RendererError {
     #[error("{0}")]
     ValidVkErr(vk::Validated<vk::VulkanError>),
     #[error("{0}")]
+    ValidBufErr(vk::Validated<vk::buffer::AllocateBufferError>),
+    #[error("{0}")]
     WindowHandleError(winit::raw_window_handle::HandleError),
     #[error("No physical devices? At all!? Seriously, as far as this program can tell, you must be reading this through a serial port, which like, props, but what on earth made you think a pixel art program would work with that?")]
     NoPhysicalDevices,
     #[error("{0}")]
     ChannelError(RecvError),
+    #[error("No graphics queues available!")]
+    NoGraphicsQueues,
+    #[error("No transfer queues available!")]
+    NoTransferQueues,
+    #[error("{0}")]
+    VkValidationErr(Box<vk::ValidationError>),
+    #[error("{0}")]
+    VkCommandBufExecErr(vk::command_buffer::CommandBufferExecError),
+}
+
+impl From<vk::command_buffer::CommandBufferExecError> for RendererError {
+    fn from(v: vk::command_buffer::CommandBufferExecError) -> Self {
+        Self::VkCommandBufExecErr(v)
+    }
+}
+
+impl From<Box<vk::ValidationError>> for RendererError {
+    fn from(v: Box<vk::ValidationError>) -> Self {
+        Self::VkValidationErr(v)
+    }
+}
+
+impl From<vk::Validated<vk::buffer::AllocateBufferError>> for RendererError {
+    fn from(v: vk::Validated<vk::buffer::AllocateBufferError>) -> Self {
+        Self::ValidBufErr(v)
+    }
 }
 
 impl From<RecvError> for RendererError {
@@ -61,7 +96,9 @@ pub struct Renderer {
     surface: Arc<vk::swapchain::Surface>,
     physical_device: Arc<vk::device::physical::PhysicalDevice>,
     logical_device: Arc<vk::device::Device>,
-    queues: Arc<[Arc<vk::device::Queue>]>,
+    command_allocator: vk::command_buffer::allocator::StandardCommandBufferAllocator,
+    graphics_queue: Arc<vk::device::Queue>,
+    transfer_queue: Arc<vk::device::Queue>,
     swapchain: Option<(Arc<vk::swapchain::Swapchain>, Vec<Arc<vk::image::Image>>)>,
 }
 
@@ -78,7 +115,7 @@ pub fn render_thread(
     window: Arc<Window>,
     render_command_channel: std::sync::mpsc::Receiver<RenderCommand>,
 ) -> Result<(), RendererError> {
-    let renderer = Renderer::initialize(window);
+    let renderer = Renderer::new(window);
     if let Err(e) = renderer {
         error!("Failed to init renderer! {}", e);
         return Err(e);
@@ -107,7 +144,7 @@ pub fn render_thread(
 
 impl Renderer {
     #[instrument]
-    pub fn initialize(window: Arc<winit::window::Window>) -> Result<Self, RendererError> {
+    pub fn new(window: Arc<winit::window::Window>) -> Result<Self, RendererError> {
         let lib = VulkanLibrary::new()?;
 
         tracing::info!(
@@ -192,103 +229,84 @@ impl Renderer {
             .iter()
             .enumerate()
             .filter(|(_, p)| p.queue_flags.intersects(both));
+        let graphics_queue_families: Vec<usize> = queue_family_indices
+            .clone()
+            .filter(|(_, p)| p.queue_flags.contains(graphics_queue_flags))
+            .map(|(i, _)| i)
+            .collect();
+        let transfer_queue_families: Vec<usize> = queue_family_indices
+            .filter(|(_, p)| p.queue_flags.contains(transfer_queue_flags))
+            .map(|(i, _)| i)
+            .collect();
 
-        let (graphics_queue_family, transfer_queue_family) = {};
+        let (both, graphics_only): (Vec<usize>, Vec<usize>) = graphics_queue_families
+            .iter()
+            .partition(|i| transfer_queue_families.contains(i));
+        let transfer_only: Vec<usize> = transfer_queue_families
+            .iter()
+            .filter(|i| !graphics_only.contains(i))
+            .copied()
+            .collect();
+        // Selects a graphics queue family and a transfer queue family.
+        // If possible, it will select different queue families.
+        let (graphics_family, transfer_family) =
+            match (both.len(), graphics_only.len(), transfer_only.len()) {
+                (0, 0, _) => {
+                    error!("No graphics queues!");
+                    return Err(RendererError::NoGraphicsQueues);
+                }
+                (0, _, 0) => {
+                    error!("No transfer queues!");
+                    return Err(RendererError::NoTransferQueues);
+                }
+                (1, 0, 0) => {
+                    warn!("Only one queue available, performance may be affected.");
+                    let q = both
+                        .first()
+                        .expect("We just confirmed that both has exactly 1 element.");
+                    (*q, *q)
+                }
+                (_, 0, 0) => (both[0], both[1]),
+                (_, 0, _) => (both[0], transfer_only[0]),
+                (_, _, 0) => (graphics_only[0], both[0]),
+                (_, _, _) => (graphics_only[0], transfer_only[0]),
+            };
 
+        let mut queues = vec![0.5];
+        if graphics_family == transfer_family {
+            queues.push(0.5);
+        }
         let graphics_queue_create_info = vk::device::QueueCreateInfo {
-            queue_family_index: todo!(),
-            queues: todo!(),
+            queue_family_index: graphics_family
+                .try_into()
+                .expect("I got this index from this device. It better be able to take it back."),
+            queues,
             ..Default::default()
         };
 
-        let queue_create_info = vk::device::QueueCreateInfo {
+        let transfer_queue_create_info = vk::device::QueueCreateInfo {
+            queue_family_index: transfer_family
+                .try_into()
+                .expect("I got this index from this device. It better be able to take it back."),
             ..Default::default()
+        };
+
+        let mut queue_create_infos = Vec::<vk::device::QueueCreateInfo>::with_capacity(2);
+
+        queue_create_infos.push(graphics_queue_create_info);
+        if graphics_family != transfer_family {
+            queue_create_infos.push(transfer_queue_create_info);
         };
 
         let logical_device = vk::device::DeviceCreateInfo {
-            queue_create_infos: vec![queue_create_info],
-            enabled_extensions: physical_device.supported_extensions().intersection(
-                &vk::device::DeviceExtensions {
-                    khr_16bit_storage: true,
-                    khr_8bit_storage: true,
-                    khr_acceleration_structure: true,
-                    khr_bind_memory2: true,
-                    khr_buffer_device_address: true,
-                    khr_copy_commands2: true,
-                    khr_create_renderpass2: true,
-                    khr_dedicated_allocation: true,
-                    khr_deferred_host_operations: true,
-                    khr_depth_stencil_resolve: true,
-                    khr_descriptor_update_template: true,
-                    khr_device_group: true,
-                    khr_display_swapchain: true,
-                    khr_draw_indirect_count: true,
-                    khr_driver_properties: true,
-                    khr_dynamic_rendering: true,
-                    khr_external_fence: true,
-                    khr_external_fence_fd: true,
-                    khr_external_fence_win32: true,
-                    khr_external_memory: true,
-                    khr_external_memory_fd: true,
-                    khr_external_memory_win32: true,
-                    khr_external_semaphore: true,
-                    khr_external_semaphore_fd: true,
-                    khr_external_semaphore_win32: true,
-                    khr_format_feature_flags2: true,
-                    khr_fragment_shader_barycentric: true,
-                    khr_fragment_shading_rate: true,
-                    khr_get_memory_requirements2: true,
-                    khr_global_priority: true,
-                    khr_image_format_list: true,
-                    khr_imageless_framebuffer: true,
-                    khr_incremental_present: true,
-                    khr_maintenance1: true,
-                    khr_maintenance2: true,
-                    khr_maintenance3: true,
-                    khr_maintenance4: true,
-                    khr_map_memory2: true,
-                    khr_multiview: true,
-                    khr_performance_query: true,
-                    khr_pipeline_executable_properties: true,
-                    khr_pipeline_library: true,
-                    khr_portability_subset: true,
-                    khr_present_id: true,
-                    khr_present_wait: true,
-                    khr_push_descriptor: true,
-                    khr_relaxed_block_layout: true,
-                    khr_sampler_mirror_clamp_to_edge: true,
-                    khr_sampler_ycbcr_conversion: true,
-                    khr_separate_depth_stencil_layouts: true,
-                    khr_shader_atomic_int64: true,
-                    khr_shader_clock: true,
-                    khr_shader_draw_parameters: true,
-                    khr_shader_float16_int8: true,
-                    khr_shader_float_controls: true,
-                    khr_shader_integer_dot_product: true,
-                    khr_shader_non_semantic_info: true,
-                    khr_shader_subgroup_extended_types: true,
-                    khr_shader_subgroup_uniform_control_flow: true,
-                    khr_shader_terminate_invocation: true,
-                    khr_shared_presentable_image: true,
-                    khr_spirv_1_4: true,
-                    khr_storage_buffer_storage_class: true,
-                    khr_swapchain: true,
-                    khr_swapchain_mutable_format: true,
-                    khr_synchronization2: true,
-                    khr_timeline_semaphore: true,
-                    khr_uniform_buffer_standard_layout: true,
-                    khr_variable_pointers: true,
-                    khr_vulkan_memory_model: true,
-                    khr_win32_keyed_mutex: true,
-                    khr_workgroup_memory_explicit_layout: true,
-                    khr_zero_initialize_workgroup_memory: true,
-                    ..Default::default()
-                },
-            ),
-            enabled_features: Features {
-                triangle_fans: true,
-                ..Default::default()
-            },
+            queue_create_infos,
+            enabled_extensions: physical_device
+                .supported_extensions()
+                .intersection(&ALL_KHR_DEVICE_EXTENSIONS),
+            // enabled_features: Features {
+            //     triangle_fans: true,
+            //     ..Default::default()
+            // },
             ..Default::default()
         };
 
@@ -308,6 +326,98 @@ impl Renderer {
         }?;
 
         let queues = queues.collect::<Arc<[_]>>();
+        let graphics_queue: Arc<vk::device::Queue> = queues
+            .iter()
+            .find(|q| {
+                graphics_family
+                    == q.queue_family_index()
+                        .try_into()
+                        .expect("I sure hope u32 fits into usize.")
+            })
+            .expect("If it didn't exist, we'd have returned an error a few lines ago.")
+            .clone();
+        let transfer_queue: Arc<vk::device::Queue> = queues
+            .iter()
+            .find(|q| {
+                transfer_family
+                    == q.queue_family_index()
+                        .try_into()
+                        .expect("I sure hope u32 fits into usize.")
+                    && q.id_within_family() != graphics_queue.id_within_family()
+            })
+            .expect("If it didn't exist, we'd have returned an error a few lines ago.")
+            .clone();
+
+        let immutable_allocator = Arc::new(
+            vk::memory::allocator::StandardMemoryAllocator::new_default(logical_device.clone()),
+        );
+
+        let square_stage_buffer =
+            Self::make_staging_buffer(immutable_allocator.clone(), SQUARE.iter().copied())?;
+        let hex_stage_buffer =
+            Self::make_staging_buffer(immutable_allocator.clone(), HEXAGON.iter().copied())?;
+        let square_idx_stage_buffer =
+            Self::make_staging_buffer(immutable_allocator.clone(), SQUARE_IDX.iter().copied())?;
+        let hex_idx_stage_buffer =
+            Self::make_staging_buffer(immutable_allocator.clone(), HEXAGON_IDX.iter().copied())?;
+
+        let square_buffer: vk::buffer::Subbuffer<[Position]> = Self::make_buffer(
+            immutable_allocator.clone(),
+            vk::buffer::BufferUsage::TRANSFER_DST | vk::buffer::BufferUsage::VERTEX_BUFFER,
+            vk::memory::allocator::MemoryTypeFilter::PREFER_DEVICE,
+            std::mem::size_of_val(&SQUARE),
+            SQUARE.len(),
+        )?;
+        let hex_buffer: vk::buffer::Subbuffer<[Position]> = Self::make_buffer(
+            immutable_allocator.clone(),
+            vk::buffer::BufferUsage::TRANSFER_DST | vk::buffer::BufferUsage::VERTEX_BUFFER,
+            vk::memory::allocator::MemoryTypeFilter::PREFER_DEVICE,
+            std::mem::size_of_val(&HEXAGON),
+            HEXAGON.len(),
+        )?;
+        let square_idx_buffer: vk::buffer::Subbuffer<[u16]> = Self::make_buffer(
+            immutable_allocator.clone(),
+            vk::buffer::BufferUsage::TRANSFER_DST | vk::buffer::BufferUsage::INDEX_BUFFER,
+            vk::memory::allocator::MemoryTypeFilter::PREFER_DEVICE,
+            std::mem::size_of_val(&SQUARE_IDX),
+            SQUARE_IDX.len(),
+        )?;
+        let hex_idx_buffer: vk::buffer::Subbuffer<[u16]> = Self::make_buffer(
+            immutable_allocator.clone(),
+            vk::buffer::BufferUsage::TRANSFER_DST | vk::buffer::BufferUsage::INDEX_BUFFER,
+            vk::memory::allocator::MemoryTypeFilter::PREFER_DEVICE,
+            std::mem::size_of_val(&HEXAGON_IDX),
+            HEXAGON_IDX.len(),
+        )?;
+
+        let command_allocator = vk::command_buffer::allocator::StandardCommandBufferAllocator::new(
+            logical_device.clone(),
+            vk::command_buffer::allocator::StandardCommandBufferAllocatorCreateInfo::default(),
+        );
+
+        let mut transfer_builder = vk::command_buffer::AutoCommandBufferBuilder::primary(
+            &command_allocator,
+            transfer_queue.queue_family_index(),
+            vk::command_buffer::CommandBufferUsage::OneTimeSubmit,
+        )?;
+        transfer_builder.copy_buffer(vk::command_buffer::CopyBufferInfoTyped::buffers(
+            square_stage_buffer,
+            square_buffer,
+        ))?;
+        transfer_builder.copy_buffer(vk::command_buffer::CopyBufferInfoTyped::buffers(
+            square_idx_stage_buffer,
+            square_idx_buffer,
+        ))?;
+        transfer_builder.copy_buffer(vk::command_buffer::CopyBufferInfoTyped::buffers(
+            hex_stage_buffer,
+            hex_buffer,
+        ))?;
+        transfer_builder.copy_buffer(vk::command_buffer::CopyBufferInfoTyped::buffers(
+            hex_idx_stage_buffer,
+            hex_idx_buffer,
+        ))?;
+        let transfer_command = transfer_builder.build()?;
+        transfer_command.execute(transfer_queue.clone())?.flush()?;
 
         Ok(Self {
             instance,
@@ -315,7 +425,9 @@ impl Renderer {
             surface,
             physical_device,
             logical_device,
-            queues,
+            command_allocator,
+            graphics_queue,
+            transfer_queue,
             swapchain: None,
         })
     }
@@ -352,5 +464,49 @@ impl Renderer {
             self.swapchain = Some(swapchain);
         }
         Ok(())
+    }
+
+    fn make_buffer<T: vk::buffer::BufferContents>(
+        allocator: Arc<impl vk::memory::allocator::MemoryAllocator>,
+        usage: vk::buffer::BufferUsage,
+        memory_type: vk::memory::allocator::MemoryTypeFilter,
+        size: usize,
+        len: usize,
+    ) -> Result<vk::buffer::Subbuffer<[T]>, RendererError> {
+        let raw_square_buf_info = vk::buffer::BufferCreateInfo {
+            flags: vk::buffer::BufferCreateFlags::empty(),
+            size: (size)
+                .try_into()
+                .expect("I sure hope the size of a few floats and u16s fits in a u64"),
+            usage,
+            ..Default::default()
+        };
+        let mut square_buf_info = raw_square_buf_info.clone();
+        square_buf_info.size = 0;
+        let square_buf_info = square_buf_info;
+        let square_alloc_info = vk::memory::allocator::AllocationCreateInfo {
+            memory_type_filter: memory_type,
+            ..Default::default()
+        };
+        let square_buf = vk::buffer::Buffer::new_unsized(
+            allocator.clone(),
+            square_buf_info,
+            square_alloc_info,
+            len.try_into().unwrap(),
+        );
+        Ok(square_buf?)
+    }
+
+    fn make_staging_buffer<T: vk::buffer::BufferContents>(
+        allocator: Arc<impl vk::memory::allocator::MemoryAllocator>,
+        iter: impl Iterator<Item = T> + std::iter::ExactSizeIterator,
+    ) -> Result<vk::buffer::Subbuffer<[T]>, RendererError> {
+        Self::make_buffer(
+            allocator,
+            vk::buffer::BufferUsage::TRANSFER_SRC,
+            vk::memory::allocator::MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+            std::mem::size_of::<T>() * iter.len(),
+            iter.len(),
+        )
     }
 }
