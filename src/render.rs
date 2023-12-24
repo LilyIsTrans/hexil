@@ -1,4 +1,10 @@
-use std::sync::{mpsc::RecvError, Arc};
+use std::{
+    sync::{
+        mpsc::{RecvError, RecvTimeoutError, TryRecvError},
+        Arc,
+    },
+    time::Duration,
+};
 use tracing::{error, instrument, warn};
 
 use thiserror::Error;
@@ -31,7 +37,7 @@ pub enum RendererError {
     #[error("No physical devices? At all!? Seriously, as far as this program can tell, you must be reading this through a serial port, which like, props, but what on earth made you think a pixel art program would work with that?")]
     NoPhysicalDevices,
     #[error("{0}")]
-    ChannelError(RecvError),
+    ChannelError(RecvTimeoutError),
     #[error("No graphics queues available!")]
     NoGraphicsQueues,
     #[error("No transfer queues available!")]
@@ -40,6 +46,12 @@ pub enum RendererError {
     VkValidationErr(Box<vk::ValidationError>),
     #[error("{0}")]
     VkCommandBufExecErr(vk::command_buffer::CommandBufferExecError),
+}
+
+impl From<RecvTimeoutError> for RendererError {
+    fn from(v: RecvTimeoutError) -> Self {
+        Self::ChannelError(v)
+    }
 }
 
 impl From<vk::command_buffer::CommandBufferExecError> for RendererError {
@@ -57,12 +69,6 @@ impl From<Box<vk::ValidationError>> for RendererError {
 impl From<vk::Validated<vk::buffer::AllocateBufferError>> for RendererError {
     fn from(v: vk::Validated<vk::buffer::AllocateBufferError>) -> Self {
         Self::ValidBufErr(v)
-    }
-}
-
-impl From<RecvError> for RendererError {
-    fn from(v: RecvError) -> Self {
-        Self::ChannelError(v)
     }
 }
 
@@ -131,7 +137,8 @@ pub fn render_thread(
 
     renderer.window.set_visible(true);
     loop {
-        match render_command_channel.recv() {
+        match render_command_channel.recv_timeout(Duration::from_nanos(100)) {
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => (),
             Err(e) => {
                 error!("Inter-thread communication failure! {}", e);
                 return Err(e.into());
@@ -510,3 +517,5 @@ impl Renderer {
         )
     }
 }
+
+mod pipeline;
