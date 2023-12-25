@@ -8,7 +8,7 @@ pub struct Position {
     position: [f32; 2],
 }
 
-pub const SQUARE: [Position; 5] = [
+pub const SQUARE: [Position; 6] = [
     Position {
         position: [0.0f32, 0.0f32],
     },
@@ -24,11 +24,12 @@ pub const SQUARE: [Position; 5] = [
     Position {
         position: [1.0f32, 1.0f32],
     },
+    Position {
+        position: [-1.0f32, -1.0f32],
+    },
 ];
 
-pub const SQUARE_IDX: [u16; 6] = [0, 1, 2, 3, 4, 1];
-
-pub const HEXAGON: [Position; 7] = [
+pub const HEXAGON: [Position; 8] = [
     Position {
         position: [0.0f32, 0.0f32],
     },
@@ -50,5 +51,7 @@ pub const HEXAGON: [Position; 7] = [
     Position {
         position: [-1.0f32, 0.0f32],
     },
+    Position {
+        position: [-0.5f32, -1.0f32],
+    },
 ];
-pub const HEXAGON_IDX: [u16; 8] = [0, 1, 2, 3, 4, 5, 6, 1];

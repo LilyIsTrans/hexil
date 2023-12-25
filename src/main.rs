@@ -1,6 +1,5 @@
 #![windows_subsystem = "windows"]
 
-use hexil::app;
 use hexil::logging;
 use hexil::render;
 use hexil::window;
