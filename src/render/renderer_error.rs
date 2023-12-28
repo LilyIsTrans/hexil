@@ -3,6 +3,8 @@ use vulkano as vk;
 use std::sync::mpsc::RecvTimeoutError;
 use thiserror::Error;
 
+/// The unified error type for all Renderer functions. There are so many different things that can go wrong with them, it's best to just
+/// shove them all into one massive error type.
 #[derive(Error, Debug)]
 pub enum RendererError {
     #[error("{0}")]

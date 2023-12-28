@@ -26,6 +26,7 @@ use self::consts::*;
 mod renderer_error;
 pub use renderer_error::*;
 
+/// Holds the entire state of Hexil's rendering system. It probably doesn't make sense to ever make more than one of this, but technically nothing is stopping you.
 #[allow(dead_code)]
 pub struct Renderer {
     instance: Arc<vk::instance::Instance>,
@@ -41,6 +42,7 @@ pub struct Renderer {
     square_buf: Subbuffer<[Position]>,
 }
 
+/// A command that can be sent to the main render thread.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderCommand {
     /// The renderer must handle the window being resized to the new dimensions (in physical pixels).
@@ -49,6 +51,7 @@ pub enum RenderCommand {
     Shutdown,
 }
 
+/// Runs Hexil's rendering system. Should be run in it's own dedicated OS thread.
 #[instrument]
 pub fn render_thread(
     window: Arc<Window>,
@@ -83,6 +86,7 @@ pub fn render_thread(
 }
 
 impl Renderer {
+    /// Makes a new `Renderer`.
     #[instrument]
     pub fn new(window: Arc<winit::window::Window>) -> Result<Self, renderer_error::RendererError> {
         let lib = Self::get_vulkan_library()?;

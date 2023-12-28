@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tracing::instrument;
 
 impl Renderer {
+    /// Makes a new buffer. This wraps a series of Vulkan nonsense (affectionate).
     #[instrument(skip(allocator))]
     pub(crate) fn make_buffer<T: vk::buffer::BufferContents>(
         allocator: Arc<impl vk::memory::allocator::MemoryAllocator>,
@@ -21,7 +22,7 @@ impl Renderer {
             flags: vk::buffer::BufferCreateFlags::empty(),
             size: (size)
                 .try_into()
-                .expect("I sure hope the size of a few floats and u16s fits in a u64"),
+                .expect("I sure hope the size of a buffer fits in a u64"),
             usage,
             ..Default::default()
         };
@@ -41,6 +42,7 @@ impl Renderer {
         Ok(square_buf?)
     }
 
+    /// Makes a staging buffer. Just a convenient wrapper for `make_buffer`. (A staging buffer is a buffer with `HOST_SEQUENTIAL_WRITE` and `TRANSFER_SRC`)
     #[instrument(skip_all)]
     pub(crate) fn make_staging_buffer<T: vk::buffer::BufferContents>(
         allocator: Arc<impl vk::memory::allocator::MemoryAllocator>,

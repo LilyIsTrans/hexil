@@ -12,6 +12,7 @@ use super::Renderer;
 
 impl Renderer {
     #[instrument]
+    /// Wraps the process of acquiring a Vulkan instance.
     pub fn get_instance(
         lib: Arc<VulkanLibrary>,
         window: Arc<winit::window::Window>,

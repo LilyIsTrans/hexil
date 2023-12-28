@@ -1,4 +1,6 @@
 use once_cell::sync::Lazy;
+/// This is basically just a hack to enable all KHR device extensions (by unioning this with `device.supported_extensions()`).
+/// I separated it into it's own file because it is huge.
 pub static ALL_KHR_DEVICE_EXTENSIONS: Lazy<vulkano::device::DeviceExtensions> =
     Lazy::new(|| vulkano::device::DeviceExtensions {
         khr_16bit_storage: true,

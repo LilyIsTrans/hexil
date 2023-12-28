@@ -5,6 +5,7 @@ use vulkano as vk;
 
 impl Renderer {
     #[instrument(skip(self))]
+    /// Wraps the process of building a new swapchain for a window.
     pub(crate) fn make_swapchain(
         &mut self,
         new_size: [u32; 2],

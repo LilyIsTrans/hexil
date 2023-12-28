@@ -9,6 +9,9 @@ use tracing::{error, instrument};
 use super::Renderer;
 
 impl Renderer {
+    /// Creates a swapchain surface for a window. This is actually a thin wrapper for `vulkano::swapchain::Surface::from_window`, except that
+    /// if there's an error it will fully unravel the error type and log it very cleanly. It was created because of a weird bug that has since
+    /// been fixed. I don't see any reason to get rid of it though.
     #[instrument]
     pub(crate) fn get_surface(
         instance: Arc<vk::instance::Instance>,

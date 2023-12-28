@@ -8,6 +8,7 @@ use super::Renderer;
 use tracing::instrument;
 
 impl Renderer {
+    /// WIP. Wraps the process of creating a Vulkan graphics pipeline.
     #[instrument(skip(self))]
     pub(super) fn make_pipeline(
         &mut self,

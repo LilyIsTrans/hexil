@@ -11,6 +11,7 @@ use tracing::instrument;
 use super::Renderer;
 
 impl Renderer {
+    /// Wraps the process of acquiring a Vulkan Library (a given installation of Vulkan).
     #[instrument]
     pub(crate) fn get_vulkan_library() -> Result<Arc<VulkanLibrary>, renderer_error::RendererError>
     {
