@@ -2,11 +2,11 @@
 use std::process::Command;
 fn main() {
     let head_hash = Command::new("git")
-        .args(&["rev-parse", "HEAD"])
+        .args(["rev-parse", "HEAD"])
         .output()
         .expect("Failed to hash HEAD!");
     let result = Command::new("git")
-        .args(&["status", "-s"])
+        .args(["status", "-s"])
         .output()
         .expect("Failed to check status!");
     let git_hash = if result.stdout.is_empty() {

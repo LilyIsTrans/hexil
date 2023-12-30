@@ -18,7 +18,7 @@ pub fn init_tracing_to_file() -> WorkerGuard {
     use tracing_appender as ta;
     let filer_verbose = ta::rolling::Builder::new();
     let filer_verbose = filer_verbose.rotation(ta::rolling::Rotation::HOURLY);
-    let filer_verbose = filer_verbose.filename_prefix(format!("{}", env!("CARGO_PKG_NAME")));
+    let filer_verbose = filer_verbose.filename_prefix(env!("CARGO_PKG_NAME").to_string());
     let filer_verbose = filer_verbose.filename_suffix("log.verbose");
     let filer_verbose = filer_verbose.max_log_files(20);
     let filer_verbose = filer_verbose.build("logs").unwrap();
