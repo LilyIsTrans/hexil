@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use vk::descriptor_set::allocator::DescriptorSetAllocator;
+use vk::device;
 use vulkano as vk;
 
 use super::renderer_error::RendererError;
@@ -9,55 +12,52 @@ use tracing::instrument;
 
 impl Renderer {
     /// WIP. Wraps the process of creating a Vulkan graphics pipeline.
-    #[instrument(skip(self))]
-    pub(super) fn make_pipeline(
-        &mut self,
-        tile_vertex_count: usize,
-        tile_index_count: usize,
-        hexagon_mode: bool,
-    ) -> Result<vk::pipeline::GraphicsPipeline, RendererError> {
+    #[instrument]
+    pub(super) fn make_gfx_pipeline(
+        device: Arc<vk::device::Device>,
+        stages: Vec<vk::pipeline::PipelineShaderStageCreateInfo>,
+        vertex_input_state: vk::pipeline::graphics::vertex_input::VertexInputState,
+        input_assembly_state: vk::pipeline::graphics::input_assembly::InputAssemblyState,
+        tessellation_state: Option<vk::pipeline::graphics::tessellation::TessellationState>,
+        viewport_state: Option<vk::pipeline::graphics::viewport::ViewportState>,
+        rasterization_state: vk::pipeline::graphics::rasterization::RasterizationState,
+        multisample_state: Option<vk::pipeline::graphics::multisample::MultisampleState>,
+        depth_stencil_state: Option<vk::pipeline::graphics::depth_stencil::DepthStencilState>,
+        color_blend_state: Option<vk::pipeline::graphics::color_blend::ColorBlendState>,
+        subpass: vk::pipeline::graphics::subpass::PipelineSubpassType,
+        discard_rectangle_state: Option<
+            vk::pipeline::graphics::discard_rectangle::DiscardRectangleState,
+        >,
+        set_layouts: Vec<Arc<vk::descriptor_set::layout::DescriptorSetLayout>>,
+        push_constant_ranges: Vec<vk::pipeline::layout::PushConstantRange>,
+    ) -> Result<Arc<vk::pipeline::GraphicsPipeline>, RendererError> {
         use pip::graphics as gfx;
         use vk::descriptor_set as ds;
         use vk::pipeline as pip;
 
-        let ds_type = ds::layout::DescriptorType::UniformBuffer;
-
-        let mut ds_vertex_bindings =
-            ds::layout::DescriptorSetLayoutBinding::descriptor_type(ds_type);
-
-        ds_vertex_bindings.descriptor_count = tile_vertex_count
-            .try_into()
-            .expect("I sure hope a usize fits in a u32");
-        ds_vertex_bindings.stages = vk::shader::ShaderStages::VERTEX;
-
-        ds_vertex_bindings.binding_flags = ds::layout::DescriptorBindingFlags::empty();
-
-        let mut ds_vertex_index_bindings = ds_vertex_bindings.clone();
-        ds_vertex_index_bindings.descriptor_count = tile_index_count
-            .try_into()
-            .expect("I sure hope a usize fits into a u32");
-
-        let mut base_tile_bindings = std::collections::BTreeMap::new();
-        base_tile_bindings.insert(0, ds_vertex_bindings);
-        base_tile_bindings.insert(1, ds_vertex_index_bindings);
-
-        let ds_layout_base_tile = ds::layout::DescriptorSetLayoutCreateInfo {
-            bindings: base_tile_bindings,
+        let layout = pip::layout::PipelineLayoutCreateInfo {
+            flags: pip::layout::PipelineLayoutCreateFlags::empty(),
+            set_layouts,
+            push_constant_ranges,
             ..Default::default()
         };
-        let ds_layout_base_tile =
-            ds::layout::DescriptorSetLayout::new(self.logical_device.clone(), ds_layout_base_tile)?;
+        let layout = pip::PipelineLayout::new(device.clone(), layout)?;
 
-        let mut ds_allocator = ds::allocator::StandardDescriptorSetAllocator::new(
-            self.logical_device.clone(),
-            Default::default(),
-        );
-        let buf = if hexagon_mode {
-            self.hex_buf.clone()
-        } else {
-            self.square_buf.clone()
-        };
+        let mut pipeline = gfx::GraphicsPipelineCreateInfo::layout(layout);
+        pipeline.flags = pip::PipelineCreateFlags::empty();
+        pipeline.stages = stages.into();
+        pipeline.vertex_input_state = Some(vertex_input_state);
+        pipeline.input_assembly_state = Some(input_assembly_state);
+        pipeline.tessellation_state = tessellation_state;
+        pipeline.viewport_state = viewport_state;
+        pipeline.rasterization_state = Some(rasterization_state);
+        pipeline.multisample_state = multisample_state;
+        pipeline.depth_stencil_state = depth_stencil_state;
+        pipeline.color_blend_state = color_blend_state;
+        pipeline.subpass = Some(subpass);
+        pipeline.discard_rectangle_state = discard_rectangle_state;
+        let pipeline = gfx::GraphicsPipeline::new(device, None, pipeline)?;
 
-        Ok(todo!())
+        Ok(pipeline)
     }
 }
