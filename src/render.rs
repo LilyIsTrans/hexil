@@ -21,8 +21,6 @@ mod canvas_bufs;
 mod consts;
 use crate::render::canvas_bufs::{Position, HEXAGON, SQUARE};
 
-use self::consts::*;
-
 mod renderer_error;
 pub use renderer_error::*;
 

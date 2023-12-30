@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-use vk::descriptor_set::allocator::DescriptorSetAllocator;
-use vk::device;
 use vulkano as vk;
 
 use super::renderer_error::RendererError;
@@ -32,7 +30,6 @@ impl Renderer {
         push_constant_ranges: Vec<vk::pipeline::layout::PushConstantRange>,
     ) -> Result<Arc<vk::pipeline::GraphicsPipeline>, RendererError> {
         use pip::graphics as gfx;
-        use vk::descriptor_set as ds;
         use vk::pipeline as pip;
 
         let layout = pip::layout::PipelineLayoutCreateInfo {

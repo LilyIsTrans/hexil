@@ -2,8 +2,6 @@ use vulkano as vk;
 
 use super::{renderer_error, Renderer};
 
-use vk::buffer::Subbuffer;
-
 use std::sync::Arc;
 
 use tracing::instrument;
