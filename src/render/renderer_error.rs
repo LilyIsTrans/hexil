@@ -1,3 +1,4 @@
+use vk::pipeline::layout::IntoPipelineLayoutCreateInfoError;
 use vulkano as vk;
 
 use std::sync::mpsc::RecvTimeoutError;
@@ -31,51 +32,72 @@ pub enum RendererError {
     VkCommandBufExecErr(vk::command_buffer::CommandBufferExecError),
     #[error("At least one subpass must be specified!")]
     NoSubpassesSpecifiedForRenderpass,
+    #[error("Shader source file not found!")]
+    ShaderSourceNotFound,
+    #[error("{0}")]
+    PipelineCreateInfoErr(IntoPipelineLayoutCreateInfoError),
+}
+
+use tracing::instrument;
+
+impl From<IntoPipelineLayoutCreateInfoError> for RendererError {
+    #[instrument(level = "error")]
+    fn from(v: IntoPipelineLayoutCreateInfoError) -> Self {
+        Self::PipelineCreateInfoErr(v)
+    }
 }
 
 impl From<RecvTimeoutError> for RendererError {
+    #[instrument(level = "error")]
     fn from(v: RecvTimeoutError) -> Self {
         Self::ChannelError(v)
     }
 }
 
 impl From<vk::command_buffer::CommandBufferExecError> for RendererError {
+    #[instrument(level = "error")]
     fn from(v: vk::command_buffer::CommandBufferExecError) -> Self {
         Self::VkCommandBufExecErr(v)
     }
 }
 
 impl From<Box<vk::ValidationError>> for RendererError {
+    #[instrument(level = "error")]
     fn from(v: Box<vk::ValidationError>) -> Self {
         Self::VkValidationErr(v)
     }
 }
 
 impl From<vk::Validated<vk::buffer::AllocateBufferError>> for RendererError {
+    #[instrument(level = "error")]
     fn from(v: vk::Validated<vk::buffer::AllocateBufferError>) -> Self {
         Self::ValidBufErr(v)
     }
 }
 
 impl From<winit::raw_window_handle::HandleError> for RendererError {
+    #[instrument(level = "error")]
     fn from(v: winit::raw_window_handle::HandleError) -> Self {
         Self::WindowHandleError(v)
     }
 }
 
 impl From<vk::Validated<vk::VulkanError>> for RendererError {
+    #[instrument(level = "error")]
     fn from(v: vk::Validated<vk::VulkanError>) -> Self {
         Self::ValidVkErr(v)
     }
 }
 
 impl From<vk::VulkanError> for RendererError {
+    #[instrument(level = "error")]
     fn from(v: vk::VulkanError) -> Self {
         Self::VkErr(v)
     }
 }
 
 impl From<vk::LoadingError> for RendererError {
+    #[instrument(level = "error")]
     fn from(v: vk::LoadingError) -> Self {
         Self::VkLoadErr(v)
     }

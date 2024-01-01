@@ -10,7 +10,7 @@ use tracing::instrument;
 
 impl Renderer {
     /// Wraps the process of creating a Vulkan graphics pipeline.
-    #[instrument]
+    #[instrument(skip_all)]
     pub(super) fn make_gfx_pipeline(
         device: Arc<vk::device::Device>,
         stages: Vec<vk::pipeline::PipelineShaderStageCreateInfo>,

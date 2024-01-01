@@ -11,7 +11,7 @@ use super::Renderer;
 
 impl Renderer {
     /// On success, returns a tuple `(device, transfer_queue, graphics_queue)`.
-    #[instrument]
+    #[instrument(skip_all)]
     pub(crate) fn get_queues_and_device(
         physical_device: Arc<vk::device::physical::PhysicalDevice>,
     ) -> Result<

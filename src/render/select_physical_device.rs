@@ -11,7 +11,7 @@ use super::Renderer;
 
 impl Renderer {
     /// Selects a Vulkan physical device. Currently, it does this by selecting whichever can do the most simultaneous instanced draws, but this is a crude heuristic. It should be updated later.
-    #[instrument]
+    #[instrument(skip_all)]
     pub(crate) fn get_physical_device(
         instance: Arc<vk::instance::Instance>,
     ) -> Result<Arc<vk::device::physical::PhysicalDevice>, renderer_error::RendererError> {
