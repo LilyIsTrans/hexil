@@ -29,6 +29,8 @@ pub enum RendererError {
     VkValidationErr(Box<vk::ValidationError>),
     #[error("{0}")]
     VkCommandBufExecErr(vk::command_buffer::CommandBufferExecError),
+    #[error("At least one subpass must be specified!")]
+    NoSubpassesSpecifiedForRenderpass,
 }
 
 impl From<RecvTimeoutError> for RendererError {

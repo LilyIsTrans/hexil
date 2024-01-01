@@ -9,7 +9,7 @@ use super::Renderer;
 use tracing::instrument;
 
 impl Renderer {
-    /// WIP. Wraps the process of creating a Vulkan graphics pipeline.
+    /// Wraps the process of creating a Vulkan graphics pipeline.
     #[instrument]
     pub(super) fn make_gfx_pipeline(
         device: Arc<vk::device::Device>,

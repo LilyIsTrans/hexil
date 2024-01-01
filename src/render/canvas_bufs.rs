@@ -10,6 +10,13 @@ pub struct Position {
     position: [f32; 2],
 }
 
+#[derive(Debug, Clone, Copy, BufferContents, Vertex)]
+#[repr(C)]
+pub struct Color {
+    #[format(R32G32_SFLOAT)]
+    position: [f32; 2],
+}
+
 /// Holds the vertices needed to define a square that fills Normalized Device Coordinate space using TRIANGLE_FAN geometry.
 pub const SQUARE: [Position; 6] = [
     Position {
