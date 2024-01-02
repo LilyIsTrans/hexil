@@ -3,6 +3,7 @@ use tracing::error;
 use tracing::info;
 use tracing::instrument;
 use tracing::warn;
+use try_log::log_tries;
 use winit::error::EventLoopError;
 use winit::error::OsError;
 use winit::event;
@@ -23,12 +24,14 @@ pub enum WindowingError {
 }
 
 impl From<EventLoopError> for WindowingError {
+    #[instrument]
     fn from(value: EventLoopError) -> Self {
         Self::ELoopErr(value)
     }
 }
 
 impl From<OsError> for WindowingError {
+    #[instrument]
     fn from(value: OsError) -> Self {
         Self::WinErr(value)
     }
@@ -40,7 +43,8 @@ impl From<OsError> for WindowingError {
 pub enum WindowCommand {}
 
 /// Makes an event loop suitable for Hexil.
-#[instrument]
+#[instrument(skip_all)]
+#[log_tries(tracing::error)]
 pub fn make_event_loop() -> Result<EventLoop<WindowCommand>, EventLoopError> {
     use winit::event_loop::EventLoopBuilder;
     EventLoopBuilder::<WindowCommand>::with_user_event().build()
@@ -48,6 +52,7 @@ pub fn make_event_loop() -> Result<EventLoop<WindowCommand>, EventLoopError> {
 
 /// Makes a window with the given title and event loop, suitable for Hexil. Hexil won't show it until the renderer is started.
 #[instrument(skip(eloop))]
+#[log_tries(tracing::error)]
 pub fn make_window(title: &str, eloop: &EventLoop<WindowCommand>) -> Result<Window, OsError> {
     use winit::window::WindowBuilder;
     WindowBuilder::new()
@@ -62,6 +67,7 @@ pub fn make_window(title: &str, eloop: &EventLoop<WindowCommand>) -> Result<Wind
 /// This must be run on the main thread, and will not return until program termination. As such,
 /// any code which runs independently must be initialized to a separate thread before this is called.
 #[instrument]
+#[log_tries(tracing::error)]
 pub fn run_event_loop(
     eloop: EventLoop<WindowCommand>,
     render_handle: std::sync::mpsc::Sender<RenderCommand>,
@@ -79,10 +85,15 @@ pub fn run_event_loop(
             event::WindowEvent::CloseRequested => {
                 info!("Closing window!");
                 send_or_exit(&render_handle, window_target, RenderCommand::Shutdown);
+                window_target.exit();
             }
             event::WindowEvent::Destroyed => {
                 warn!("Window destroyed!!");
                 send_or_exit(&render_handle, window_target, RenderCommand::Shutdown);
+            }
+            event::WindowEvent::RedrawRequested => {
+                send_or_exit(&render_handle, window_target, RenderCommand::Redraw);
+                window_target.set_control_flow(winit::event_loop::ControlFlow::Poll);
             }
             _ => (),
         },

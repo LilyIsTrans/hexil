@@ -36,6 +36,15 @@ pub enum RendererError {
     ShaderSourceNotFound,
     #[error("{0}")]
     PipelineCreateInfoErr(IntoPipelineLayoutCreateInfoError),
+    #[error("{0}")]
+    RecvErr(std::sync::mpsc::RecvError),
+}
+
+impl From<std::sync::mpsc::RecvError> for RendererError {
+    #[instrument(level = "error")]
+    fn from(v: std::sync::mpsc::RecvError) -> Self {
+        Self::RecvErr(v)
+    }
 }
 
 use tracing::instrument;

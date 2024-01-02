@@ -1,20 +1,17 @@
 use std::sync::Arc;
 
-use super::{renderer_error, types::Position};
+use super::renderer_error;
 use tracing::instrument;
-use vk::{
-    buffer::{Buffer, BufferCreateInfo, BufferUsage},
-    image::view::ImageView,
-    memory::allocator::{AllocationCreateInfo, MemoryTypeFilter},
-    render_pass::{Framebuffer, FramebufferCreateInfo},
-};
+use try_log::log_tries;
+
 use vulkano as vk;
 
 use super::Renderer;
 
 impl Renderer {
     /// Makes a new `Renderer`.
-    #[instrument]
+    #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
     pub fn new(window: Arc<winit::window::Window>) -> Result<Self, renderer_error::RendererError> {
         let lib = Self::get_vulkan_library()?;
 
@@ -53,30 +50,6 @@ impl Renderer {
             },
         );
 
-        let vertex1 = Position {
-            position: [-0.5, -0.5],
-        };
-        let vertex2 = Position {
-            position: [0.0, 0.5],
-        };
-        let vertex3 = Position {
-            position: [0.5, -0.25],
-        };
-
-        let vertex_buffer = Buffer::from_iter(
-            allocator.clone(),
-            BufferCreateInfo {
-                usage: BufferUsage::VERTEX_BUFFER,
-                ..Default::default()
-            },
-            AllocationCreateInfo {
-                memory_type_filter: MemoryTypeFilter::PREFER_DEVICE
-                    | MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            vec![vertex1, vertex2, vertex3],
-        )?;
-
         Ok(Self {
             instance,
             window,
@@ -86,10 +59,6 @@ impl Renderer {
             command_allocator,
             graphics_queue,
             transfer_queue,
-            render_pass: None,
-            framebuffers: None,
-            vertex_buffer,
-            swapchain: None,
             allocator,
         })
     }

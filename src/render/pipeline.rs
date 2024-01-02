@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use try_log::log_tries;
 use vulkano as vk;
 
 use super::renderer_error::RendererError;
@@ -11,6 +12,7 @@ use tracing::instrument;
 impl Renderer {
     /// Wraps the process of creating a Vulkan graphics pipeline.
     #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
     pub(super) fn make_gfx_pipeline(
         device: Arc<vk::device::Device>,
         stages: Vec<vk::pipeline::PipelineShaderStageCreateInfo>,

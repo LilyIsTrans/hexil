@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use try_log::log_tries;
 use vulkano as vk;
 
 use vk::VulkanLibrary;
@@ -11,7 +12,8 @@ use super::renderer_error;
 use super::Renderer;
 
 impl Renderer {
-    #[instrument]
+    #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
     /// Wraps the process of acquiring a Vulkan instance.
     pub fn get_instance(
         lib: Arc<VulkanLibrary>,

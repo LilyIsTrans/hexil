@@ -1,28 +1,30 @@
+use std::sync::Arc;
+
 use super::renderer_error;
 use super::Renderer;
 use tracing::instrument;
+use try_log::log_tries;
 use vk::swapchain::ColorSpace;
 use vulkano as vk;
 
 impl Renderer {
-    #[instrument(skip(self))]
+    #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
     /// Wraps the process of building a new swapchain for a window.
     pub(crate) fn make_swapchain(
-        &mut self,
+        &self,
+        old_swapchain: Option<(Arc<vk::swapchain::Swapchain>, Vec<Arc<vk::image::Image>>)>,
         new_size: [u32; 2],
-    ) -> Result<(), renderer_error::RendererError> {
+    ) -> Result<
+        Option<(Arc<vk::swapchain::Swapchain>, Vec<Arc<vk::image::Image>>)>,
+        renderer_error::RendererError,
+    > {
         if new_size == [0u32, 0u32] {
-            self.swapchain = None;
-        } else if self
-            .swapchain
-            .as_ref()
-            .is_some_and(|swapchain| swapchain.0.image_extent() == new_size)
-        {
-            let _ = 0; // Noop to make it clearer that this is a separate do nothing path;
-        } else if let Some(swapchain) = self.swapchain.clone() {
+            Ok(None)
+        } else if let Some(swapchain) = old_swapchain {
             let mut create_info = swapchain.0.create_info();
             create_info.image_extent = new_size;
-            self.swapchain = Some(swapchain.0.recreate(create_info)?);
+            Ok(Some(swapchain.0.recreate(create_info)?))
         } else {
             let swapchain = vk::swapchain::SwapchainCreateInfo {
                 image_format: self
@@ -42,13 +44,11 @@ impl Renderer {
                 // present_modes: todo!(), // TODO: Add support for changing this in a settings menu
                 ..Default::default()
             };
-            let swapchain = vk::swapchain::Swapchain::new(
+            Ok(Some(vk::swapchain::Swapchain::new(
                 self.logical_device.clone(),
                 self.surface.clone(),
                 swapchain,
-            )?;
-            self.swapchain = Some(swapchain);
+            )?))
         }
-        Ok(())
     }
 }

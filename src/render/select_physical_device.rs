@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::renderer_error;
 
+use try_log::log_tries;
 use vulkano as vk;
 
 use tracing::info;
@@ -12,6 +13,7 @@ use super::Renderer;
 impl Renderer {
     /// Selects a Vulkan physical device. Currently, it does this by selecting whichever can do the most simultaneous instanced draws, but this is a crude heuristic. It should be updated later.
     #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
     pub(crate) fn get_physical_device(
         instance: Arc<vk::instance::Instance>,
     ) -> Result<Arc<vk::device::physical::PhysicalDevice>, renderer_error::RendererError> {

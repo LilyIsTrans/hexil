@@ -3,6 +3,7 @@ use std::sync::Arc;
 use super::renderer_error;
 use tracing::error;
 use tracing::instrument;
+use try_log::log_tries;
 use vulkano as vk;
 
 use tracing::warn;
@@ -12,6 +13,7 @@ use super::Renderer;
 impl Renderer {
     /// On success, returns a tuple `(device, transfer_queue, graphics_queue)`.
     #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
     pub(crate) fn get_queues_and_device(
         physical_device: Arc<vk::device::physical::PhysicalDevice>,
     ) -> Result<

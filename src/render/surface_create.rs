@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use try_log::log_tries;
 use vulkano as vk;
 
 use super::renderer_error;
@@ -13,6 +14,7 @@ impl Renderer {
     /// if there's an error it will fully unravel the error type and log it very cleanly. It was created because of a weird bug that has since
     /// been fixed. I don't see any reason to get rid of it though.
     #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
     pub(crate) fn get_surface(
         instance: Arc<vk::instance::Instance>,
         window: Arc<winit::window::Window>,

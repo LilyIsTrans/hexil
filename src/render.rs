@@ -1,4 +1,5 @@
 mod buffer_make;
+mod command_buffers;
 mod framebuffer;
 mod init_renderer_state;
 mod instance_create;
@@ -13,13 +14,7 @@ mod surface_create;
 use std::{sync::Arc, time::Duration};
 use tracing::{error, instrument};
 
-use tracing::info;
-use vk::command_buffer::allocator::StandardCommandBufferAllocator;
-use vk::command_buffer::{
-    AutoCommandBufferBuilder, CommandBufferUsage, RenderPassBeginInfo, SubpassBeginInfo,
-    SubpassContents, SubpassEndInfo,
-};
-use vk::device::Queue;
+use try_log::log_tries;
 use vk::pipeline::graphics::color_blend::{ColorBlendAttachmentState, ColorBlendState};
 use vk::pipeline::graphics::input_assembly::InputAssemblyState;
 use vk::pipeline::graphics::multisample::MultisampleState;
@@ -31,11 +26,10 @@ use vk::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
 use vk::pipeline::{GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo};
 use vk::render_pass::{Framebuffer, Subpass};
 use vk::swapchain::SwapchainPresentInfo;
-use vk::{buffer::Subbuffer, command_buffer::PrimaryCommandBufferAbstract, sync::GpuFuture};
+use vk::{buffer::Subbuffer, sync::GpuFuture};
 use vk::{Validated, VulkanError};
 use vulkano as vk;
 use winit::window::Window;
-
 mod types;
 
 mod consts;
@@ -43,6 +37,7 @@ mod consts;
 mod renderer_error;
 pub use renderer_error::*;
 
+use self::framebuffer::make_framebuffers;
 use self::types::Position;
 
 /// Holds the entire state of Hexil's rendering system. It probably doesn't make sense to ever make more than one of this, but technically nothing is stopping you.
@@ -56,20 +51,7 @@ pub struct Renderer {
     command_allocator: vk::command_buffer::allocator::StandardCommandBufferAllocator,
     graphics_queue: Arc<vk::device::Queue>,
     transfer_queue: Arc<vk::device::Queue>,
-    render_pass: Option<Arc<vk::render_pass::RenderPass>>,
-    framebuffers: Option<Vec<Arc<Framebuffer>>>,
-    vertex_buffer: vk::buffer::Subbuffer<[Position]>,
-    swapchain: Option<(Arc<vk::swapchain::Swapchain>, Vec<Arc<vk::image::Image>>)>,
     allocator: Arc<vk::memory::allocator::StandardMemoryAllocator>,
-}
-
-/// A command that can be sent to the main render thread.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RenderCommand {
-    /// The renderer must handle the window being resized to the new dimensions (in physical pixels).
-    WindowResized([u32; 2]),
-    /// The renderer should shut down gracefully
-    Shutdown,
 }
 
 mod vert {
@@ -85,75 +67,16 @@ mod frag {
     }
 }
 
-use vulkano::command_buffer::PrimaryAutoCommandBuffer;
-type Res<T> = Result<T, RendererError>;
-fn get_command_buffers(
-    command_buffer_allocator: &StandardCommandBufferAllocator,
-    queue: &Arc<Queue>,
-    pipeline: &Arc<GraphicsPipeline>,
-    framebuffers: &Vec<Arc<Framebuffer>>,
-    vertex_buffer: &Subbuffer<[Position]>,
-) -> Res<Vec<Arc<PrimaryAutoCommandBuffer>>> {
-    framebuffers
-        .iter()
-        .map(|framebuffer| {
-            let mut builder = AutoCommandBufferBuilder::primary(
-                command_buffer_allocator,
-                queue.queue_family_index(),
-                // Don't forget to write the correct buffer usage.
-                CommandBufferUsage::MultipleSubmit,
-            )?;
-
-            builder
-                .begin_render_pass(
-                    RenderPassBeginInfo {
-                        clear_values: vec![Some([0.1, 0.1, 0.1, 1.0].into())],
-                        ..RenderPassBeginInfo::framebuffer(framebuffer.clone())
-                    },
-                    SubpassBeginInfo {
-                        contents: SubpassContents::Inline,
-                        ..Default::default()
-                    },
-                )?
-                .bind_pipeline_graphics(pipeline.clone())?
-                .bind_vertex_buffers(0, vertex_buffer.clone())?
-                .draw(vertex_buffer.len() as u32, 1, 0, 0)?
-                .end_render_pass(SubpassEndInfo::default())?;
-
-            Ok(builder.build()?)
-        })
-        .collect()
-}
-
-/// Runs Hexil's rendering system. Should be run in it's own dedicated OS thread.
-#[instrument]
-pub fn render_thread(
-    window: Arc<Window>,
-    render_command_channel: std::sync::mpsc::Receiver<RenderCommand>,
-) -> Result<(), renderer_error::RendererError> {
-    let size = window.inner_size();
-    let renderer = Renderer::new(window.clone());
-    if let Err(e) = renderer {
-        error!("Failed to init renderer! {}", e);
-        return Err(e);
-    }
-    let mut renderer = renderer?;
-    renderer.window.set_visible(true);
-    render_command_channel.recv_timeout(Duration::from_secs(1));
-    renderer.make_swapchain(size.into())?;
-    renderer.make_renderpass()?;
-    renderer.make_framebuffers()?;
-
-    let vert = vert::load(renderer.logical_device.clone())?;
-    let frag = frag::load(renderer.logical_device.clone())?;
-
-    let viewport = Viewport {
-        offset: [0.0, 0.0],
-        extent: window.inner_size().into(),
-        depth_range: 0.0..=1.0,
-    };
-
-    let pipeline = {
+impl Renderer {
+    #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
+    fn make_pipeline(
+        &self,
+        vert: Arc<vk::shader::ShaderModule>,
+        frag: Arc<vk::shader::ShaderModule>,
+        render_pass: Arc<vk::render_pass::RenderPass>,
+        viewport: &Viewport,
+    ) -> Result<Arc<vk::pipeline::GraphicsPipeline>, RendererError> {
         // A Vulkan shader can in theory contain multiple entry points, so we have to specify
         // which one.
         let vs = vert
@@ -171,15 +94,15 @@ pub fn render_thread(
         ];
 
         let layout = PipelineLayout::new(
-            renderer.logical_device.clone(),
+            self.logical_device.clone(),
             PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
-                .into_pipeline_layout_create_info(renderer.logical_device.clone())?,
+                .into_pipeline_layout_create_info(self.logical_device.clone())?,
         )?;
 
-        let subpass = Subpass::from(renderer.render_pass.as_ref().unwrap().clone(), 0).unwrap();
+        let subpass = Subpass::from(render_pass.clone(), 0).unwrap();
 
-        GraphicsPipeline::new(
-            renderer.logical_device.clone(),
+        Ok(GraphicsPipeline::new(
+            self.logical_device.clone(),
             None,
             GraphicsPipelineCreateInfo {
                 // The stages of our pipeline, we have vertex and fragment stages.
@@ -190,7 +113,7 @@ pub fn render_thread(
                 input_assembly_state: Some(InputAssemblyState::default()),
                 // Set the fixed viewport.
                 viewport_state: Some(ViewportState {
-                    viewports: [viewport].into_iter().collect(),
+                    viewports: [viewport.clone()].into(),
                     ..Default::default()
                 }),
                 // Ignore these for now.
@@ -204,54 +127,281 @@ pub fn render_thread(
                 subpass: Some(subpass.into()),
                 ..GraphicsPipelineCreateInfo::layout(layout)
             },
-        )?
-    };
+        )?)
+    }
+}
 
-    let command_buffers = get_command_buffers(
-        &renderer.command_allocator,
-        &renderer.graphics_queue.clone(),
-        &pipeline,
-        &renderer.framebuffers.as_ref().clone().unwrap(),
-        &renderer.vertex_buffer,
-    )?;
+/// A command that can be sent to the main render thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RenderCommand {
+    Redraw,
+    /// The renderer must handle the window being resized to the new dimensions (in physical pixels).
+    WindowResized([u32; 2]),
+    /// The renderer should shut down gracefully
+    Shutdown,
+}
+
+struct SwapchainWrapper {
+    viewport: Viewport,
+    swapchain: Arc<vk::swapchain::Swapchain>,
+    swapchain_images: Vec<Arc<vk::image::Image>>,
+    render_pass: Arc<vk::render_pass::RenderPass>,
+    framebuffers: Vec<Arc<Framebuffer>>,
+    pipeline: PipelineWrapper,
+}
+
+impl SwapchainWrapper {
+    #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
+    pub fn new(
+        renderer: &Renderer,
+        size: [u32; 2],
+        vert: Arc<vk::shader::ShaderModule>,
+        frag: Arc<vk::shader::ShaderModule>,
+        vertex_buffer: Subbuffer<[Position]>,
+    ) -> Result<Option<SwapchainWrapper>, RendererError> {
+        let viewport = Viewport {
+            offset: [0.0, 0.0],
+            extent: size.map(|f| f as f32),
+            depth_range: 0.0..=1.0,
+        };
+        let (swapchain, swapchain_images): (
+            Arc<vk::swapchain::Swapchain>,
+            Vec<Arc<vk::image::Image>>,
+        ) = match renderer.make_swapchain(None, size) {
+            Ok(Some(it)) => it,
+            Ok(None) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let render_pass: Arc<vk::render_pass::RenderPass> =
+            renderer.make_renderpass(swapchain.clone())?;
+        let framebuffers: Vec<Arc<Framebuffer>> =
+            make_framebuffers(&swapchain_images, render_pass.clone())?;
+
+        let pipeline = PipelineWrapper::new(
+            &renderer,
+            vert,
+            frag,
+            vertex_buffer,
+            &render_pass,
+            &viewport,
+            &framebuffers,
+        )?;
+
+        Ok(Some(Self {
+            viewport,
+            swapchain,
+            swapchain_images,
+            render_pass,
+            framebuffers,
+            pipeline,
+        }))
+    }
+
+    #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
+    pub fn rebuild(
+        self,
+        renderer: &Renderer,
+        size: [u32; 2],
+    ) -> Result<Option<SwapchainWrapper>, RendererError> {
+        let viewport = Viewport {
+            offset: [0.0, 0.0],
+            extent: size.map(|f| f as f32),
+            depth_range: 0.0..=1.0,
+        };
+        let old_format = self.swapchain.image_format();
+        let (swapchain, swapchain_images): (
+            Arc<vk::swapchain::Swapchain>,
+            Vec<Arc<vk::image::Image>>,
+        ) = match renderer.make_swapchain(Some((self.swapchain, self.swapchain_images)), size) {
+            Ok(Some(it)) => it,
+            Ok(None) => return Ok(None),
+            Err(err) => return Err(err),
+        };
+        let render_pass: Arc<vk::render_pass::RenderPass> =
+            if swapchain.image_format() != old_format {
+                renderer.make_renderpass(swapchain.clone())?
+            } else {
+                self.render_pass
+            };
+        let framebuffers: Vec<Arc<Framebuffer>> =
+            make_framebuffers(&swapchain_images, render_pass.clone())?;
+
+        let pipeline = PipelineWrapper::new(
+            &renderer,
+            self.pipeline.vert,
+            self.pipeline.frag,
+            self.pipeline.vertex_buffer,
+            &render_pass,
+            &viewport,
+            &framebuffers,
+        )?;
+        Ok(Some(Self {
+            viewport,
+            swapchain,
+            swapchain_images,
+            render_pass,
+            framebuffers,
+            pipeline,
+        }))
+    }
+}
+
+struct PipelineWrapper {
+    vert: Arc<vk::shader::ShaderModule>,
+    frag: Arc<vk::shader::ShaderModule>,
+    vertex_buffer: vk::buffer::Subbuffer<[Position]>,
+    pipeline: Arc<vk::pipeline::GraphicsPipeline>,
+    command_buffers: Vec<Arc<vk::command_buffer::PrimaryAutoCommandBuffer>>,
+}
+
+impl PipelineWrapper {
+    #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
+    pub fn new(
+        renderer: &Renderer,
+        vert: Arc<vk::shader::ShaderModule>,
+        frag: Arc<vk::shader::ShaderModule>,
+        vertex_buffer: Subbuffer<[Position]>,
+        render_pass: &Arc<vk::render_pass::RenderPass>,
+        viewport: &Viewport,
+        framebuffers: &Vec<Arc<Framebuffer>>,
+    ) -> Result<Self, RendererError> {
+        let pipeline =
+            renderer.make_pipeline(vert.clone(), frag.clone(), render_pass.clone(), &viewport)?;
+
+        let command_buffers = command_buffers::get_command_buffers(
+            &renderer.command_allocator,
+            &renderer.graphics_queue.clone(),
+            &pipeline,
+            &framebuffers.clone(),
+            &vertex_buffer,
+        )?;
+
+        Ok(Self {
+            vert,
+            frag,
+            vertex_buffer,
+            pipeline,
+            command_buffers,
+        })
+    }
+}
+impl SwapchainWrapper {
+    #[instrument(skip_all)]
+    #[log_tries(tracing::error)]
+    fn make_canvas_swapchain(
+        renderer: &Renderer,
+        size: [u32; 2],
+    ) -> Result<Option<SwapchainWrapper>, RendererError> {
+        let vertex1 = Position {
+            position: [-0.5, -0.5],
+        };
+        let vertex2 = Position {
+            position: [0.0, 0.5],
+        };
+        let vertex3 = Position {
+            position: [0.5, -0.25],
+        };
+
+        let vertex_buffer = vk::buffer::Buffer::from_iter(
+            renderer.allocator.clone(),
+            vk::buffer::BufferCreateInfo {
+                usage: vk::buffer::BufferUsage::VERTEX_BUFFER,
+                ..Default::default()
+            },
+            vk::memory::allocator::AllocationCreateInfo {
+                memory_type_filter: vk::memory::allocator::MemoryTypeFilter::PREFER_DEVICE
+                    | vk::memory::allocator::MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
+                ..Default::default()
+            },
+            vec![vertex1, vertex2, vertex3],
+        )?;
+
+        let vert: Arc<vk::shader::ShaderModule> = vert::load(renderer.logical_device.clone())?;
+        let frag: Arc<vk::shader::ShaderModule> = frag::load(renderer.logical_device.clone())?;
+
+        Ok(SwapchainWrapper::new(
+            &renderer,
+            size,
+            vert.clone(),
+            frag.clone(),
+            vertex_buffer,
+        )?)
+    }
+}
+
+/// Runs Hexil's rendering system. Should be run in it's own dedicated OS thread.
+#[instrument(skip_all)]
+pub fn render_thread(
+    window: Arc<Window>,
+    render_command_channel: std::sync::mpsc::Receiver<RenderCommand>,
+) -> Result<(), renderer_error::RendererError> {
+    use try_log::try_or_err;
+    window.set_visible(true);
+    let renderer = Renderer::new(window.clone());
+    if let Err(e) = renderer {
+        error!("Failed to init renderer! {}", e);
+        return Err(e);
+    }
+    let renderer = try_or_err!(renderer);
+
+    let mut swapchain_wrapper = try_or_err!(SwapchainWrapper::make_canvas_swapchain(
+        &renderer,
+        window.inner_size().into()
+    ));
 
     loop {
-        match render_command_channel.recv_timeout(Duration::from_nanos(100)) {
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                let (image_i, suboptimal, acquire_future) = match vk::swapchain::acquire_next_image(
-                    renderer.swapchain.as_ref().unwrap().clone().0,
-                    None,
-                )
-                .map_err(Validated::unwrap)
-                {
-                    Ok(r) => r,
-                    Err(VulkanError::OutOfDate) => {
-                        panic!("failed to acquire next image")
-                    }
-                    Err(e) => panic!("failed to acquire next image: {e}"),
-                };
+        match render_command_channel.recv() {
+            Ok(RenderCommand::Redraw) => {
+                if let Some(swapchain_wrapper) = &swapchain_wrapper {
+                    let (image_i, suboptimal, acquire_future) =
+                        match vk::swapchain::acquire_next_image(
+                            swapchain_wrapper.swapchain.clone(),
+                            None,
+                        )
+                        .map_err(Validated::unwrap)
+                        {
+                            Ok(r) => r,
+                            Err(VulkanError::OutOfDate) => {
+                                continue;
+                            }
+                            Err(e) => return Err(e.into()),
+                        };
 
-                let execution = vk::sync::now(renderer.logical_device.clone())
-                    .join(acquire_future)
-                    .then_execute(
-                        renderer.graphics_queue.clone(),
-                        command_buffers[image_i as usize].clone(),
-                    )?
+                    let execution = try_or_err!(vk::sync::now(renderer.logical_device.clone())
+                        .join(acquire_future)
+                        .then_execute(
+                            renderer.graphics_queue.clone(),
+                            swapchain_wrapper.pipeline.command_buffers[image_i as usize].clone(),
+                        ))
                     .then_swapchain_present(
                         renderer.graphics_queue.clone(),
                         SwapchainPresentInfo::swapchain_image_index(
-                            renderer.swapchain.as_ref().unwrap().0.clone(),
+                            swapchain_wrapper.swapchain.clone(),
                             image_i,
                         ),
                     )
-                    .then_signal_fence_and_flush()?
-                    .wait(None);
+                    .then_signal_fence_and_flush();
+                    if let Ok(execution) = execution {
+                        try_or_err!(execution.wait(None));
+                    } else {
+                        error!("Oh no!");
+                    }
+                }
             }
             Err(e) => {
                 error!("Inter-thread communication failure! {}", e);
                 return Err(e.into());
             }
-            Ok(RenderCommand::WindowResized(new_size)) => renderer.make_swapchain(new_size)?,
+            Ok(RenderCommand::WindowResized(new_size)) => {
+                swapchain_wrapper = try_or_err!(if swapchain_wrapper.is_some() {
+                    swapchain_wrapper.unwrap().rebuild(&renderer, new_size)
+                } else {
+                    SwapchainWrapper::make_canvas_swapchain(&renderer, new_size)
+                });
+            }
             Ok(RenderCommand::Shutdown) => return Ok(()),
         }
     }
