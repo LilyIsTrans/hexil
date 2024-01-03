@@ -1,15 +1,12 @@
 use super::RendererError;
-use std::sync::Arc;
 use tracing::instrument;
 use try_log::log_tries;
 use vulkano as vk;
 
-type Result<T> = std::result::Result<T, RendererError>;
-type Void = Result<()>;
-
 #[instrument(skip_all)]
 #[log_tries(tracing::error)]
-pub(super) fn make_canvas_subpasses() -> Result<vk::render_pass::SubpassDescription> {
+pub(super) fn make_canvas_subpasses() -> Result<vk::render_pass::SubpassDescription, RendererError>
+{
     use vk::image as img;
     use vk::render_pass as rpass;
 

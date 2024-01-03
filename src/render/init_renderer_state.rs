@@ -19,7 +19,7 @@ impl Renderer {
 
         let surface = Self::get_surface(instance.clone(), window.clone())?;
 
-        let physical_device = Self::get_physical_device(instance.clone())?;
+        let physical_device = Self::get_physical_device(instance.clone(), surface.as_ref())?;
 
         let (logical_device, transfer_queue, graphics_queue) =
             Self::get_queues_and_device(physical_device.clone())?;
@@ -31,23 +31,6 @@ impl Renderer {
         let command_allocator = vk::command_buffer::allocator::StandardCommandBufferAllocator::new(
             logical_device.clone(),
             vk::command_buffer::allocator::StandardCommandBufferAllocatorCreateInfo::default(),
-        );
-
-        let canvas_size_buf = vk::buffer::Buffer::from_data(
-            allocator.clone(),
-            vk::buffer::BufferCreateInfo {
-                usage: vk::buffer::BufferUsage::UNIFORM_BUFFER,
-                ..Default::default()
-            },
-            vk::memory::allocator::AllocationCreateInfo {
-                memory_type_filter: vk::memory::allocator::MemoryTypeFilter::PREFER_DEVICE
-                    | vk::memory::allocator::MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
-                ..Default::default()
-            },
-            crate::app::CanvasSize {
-                width: 128u64,
-                height: 128u64,
-            },
         );
 
         Ok(Self {

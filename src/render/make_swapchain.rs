@@ -26,21 +26,24 @@ impl Renderer {
             create_info.image_extent = new_size;
             Ok(Some(swapchain.0.recreate(create_info)?))
         } else {
+            let mut present_mode = vk::swapchain::PresentMode::Fifo;
+            if *(super::select_physical_device::MAILBOX_MODE.get_or_init(|| false)) {
+                present_mode = vk::swapchain::PresentMode::Mailbox;
+            }
             let swapchain = vk::swapchain::SwapchainCreateInfo {
                 image_format: self
                     .physical_device
                     .surface_formats(&self.surface, Default::default())?
                     .into_iter()
-                    .find(|(f, c)| ColorSpace::SrgbNonLinear == *c)
+                    .find(|(_, c)| ColorSpace::SrgbNonLinear == *c)
                     .unwrap()
                     .0,
                 image_view_formats: Default::default(),
                 image_extent: new_size,
-                image_usage: vk::image::ImageUsage::STORAGE
-                    | vk::image::ImageUsage::COLOR_ATTACHMENT, // TODO: Might need to be updated to allow for displaying
-                pre_transform: vk::swapchain::SurfaceTransform::Identity,
+                image_usage: vk::image::ImageUsage::COLOR_ATTACHMENT, // TODO: Might need to be updated to allow for displaying
+                pre_transform: vk::swapchain::SurfaceTransform::Identity, // TODO: Switch to inherit from OS
                 composite_alpha: vk::swapchain::CompositeAlpha::Opaque,
-                present_mode: vk::swapchain::PresentMode::Fifo,
+                present_mode,
                 // present_modes: todo!(), // TODO: Add support for changing this in a settings menu
                 ..Default::default()
             };

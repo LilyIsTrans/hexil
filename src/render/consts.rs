@@ -76,5 +76,6 @@ pub static ALL_KHR_DEVICE_EXTENSIONS: Lazy<vulkano::device::DeviceExtensions> =
         khr_win32_keyed_mutex: true,
         khr_workgroup_memory_explicit_layout: true,
         khr_zero_initialize_workgroup_memory: true,
+        ext_line_rasterization: true,
         ..Default::default()
     });

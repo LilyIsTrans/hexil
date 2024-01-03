@@ -1,7 +1,7 @@
 use proc_macro::{self, TokenStream};
 use quote::quote;
 use syn::visit_mut::{self, VisitMut};
-use syn::{parse_quote, Expr, File, Lit, LitInt};
+use syn::{parse_quote, Expr};
 
 struct TryExprReplace {
     log_function: syn::ExprPath,

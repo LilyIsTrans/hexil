@@ -23,6 +23,7 @@ impl Renderer {
 
         let needed_extensions = vk::instance::InstanceExtensions {
             khr_get_surface_capabilities2: true,
+            khr_get_physical_device_properties2: true,
             ..Default::default()
         }
         .union(&needed_extensions);

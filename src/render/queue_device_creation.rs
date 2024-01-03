@@ -4,6 +4,7 @@ use super::renderer_error;
 use tracing::error;
 use tracing::instrument;
 use try_log::log_tries;
+use vk::device::Features;
 use vulkano as vk;
 
 use tracing::warn;
@@ -106,10 +107,10 @@ impl Renderer {
             enabled_extensions: physical_device
                 .supported_extensions()
                 .intersection(&super::consts::ALL_KHR_DEVICE_EXTENSIONS),
-            // enabled_features: Features {
-            //     triangle_fans: true,
-            //     ..Default::default()
-            // },
+            enabled_features: Features {
+                bresenham_lines: true,
+                ..Default::default()
+            },
             ..Default::default()
         };
 
