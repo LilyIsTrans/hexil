@@ -5,7 +5,7 @@ use vulkano::pipeline::graphics::vertex_input::Vertex;
 #[repr(transparent)]
 pub struct PaletteIndex {
     #[format(R32_UINT)]
-    pub idx: u32,
+    pub idx: i32,
 }
 #[derive(Debug, Clone, Copy, Zeroable, Pod, Vertex)]
 #[repr(C)]
@@ -16,6 +16,6 @@ pub struct Position {
 #[derive(Debug, Clone, Copy, Zeroable, TransparentWrapper, Pod, Vertex)]
 #[repr(transparent)]
 pub struct ColorOklab {
-    #[format(R32G32B32_SFLOAT)]
-    pub col: palette::Oklab,
+    #[format(R32G32B32A32_SFLOAT)]
+    pub col: palette::Oklaba,
 }

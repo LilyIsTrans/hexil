@@ -1,6 +1,4 @@
 use smallvec::smallvec;
-use tracing::instrument;
-use try_log::log_tries;
 use vk::command_buffer::SubpassEndInfo;
 
 use vk::command_buffer::SubpassContents;
@@ -14,6 +12,7 @@ use vk::command_buffer::CommandBufferUsage;
 use vk::command_buffer::AutoCommandBufferBuilder;
 use vk::command_buffer::PrimaryAutoCommandBuffer;
 use vk::pipeline::graphics::viewport::Viewport;
+use vk::pipeline::PipelineLayout;
 use vulkano as vk;
 
 use super::types::Position;
@@ -31,12 +30,11 @@ use std::sync::Arc;
 
 use vk::command_buffer::allocator::StandardCommandBufferAllocator;
 
-#[instrument(skip(command_buffer_allocator, queue, pipeline, framebuffers, vertex_buffer))]
-#[log_tries(tracing::error)]
 pub(crate) fn get_command_buffers(
     command_buffer_allocator: &StandardCommandBufferAllocator,
     queue: &Arc<Queue>,
     pipeline: &Arc<GraphicsPipeline>,
+    layout: &Arc<PipelineLayout>,
     viewport: Viewport,
     framebuffers: &Vec<Arc<Framebuffer>>,
     vertex_buffer: &Subbuffer<[Position]>,
@@ -63,6 +61,12 @@ pub(crate) fn get_command_buffers(
                     },
                 )?
                 .bind_pipeline_graphics(pipeline.clone())?
+                // .bind_descriptor_sets(
+                //     vk::pipeline::PipelineBindPoint::Graphics,
+                //     layout.clone(),
+                //     0,
+                //     todo!(),
+                // )?
                 .bind_vertex_buffers(0, vertex_buffer.clone())?
                 .set_viewport(0, smallvec![viewport.clone()])?
                 .draw(vertex_buffer.len() as u32, 1, 0, 0)?

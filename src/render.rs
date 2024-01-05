@@ -1,21 +1,18 @@
-mod buffer_make;
 mod command_buffers;
 mod framebuffer;
 mod init_renderer_state;
 mod instance_create;
 mod lib_select;
 mod make_swapchain;
-mod pipeline;
 mod queue_device_creation;
 mod render_pass;
 mod select_physical_device;
-mod subpass;
 mod surface_create;
 mod window_wrappers;
+use std::collections::BTreeMap;
 use std::sync::Arc;
-use tracing::{error, instrument, trace};
+use tracing::{error, trace};
 
-use try_log::log_tries;
 use vk::pipeline::graphics::color_blend::{ColorBlendAttachmentState, ColorBlendState};
 use vk::pipeline::graphics::input_assembly::InputAssemblyState;
 use vk::pipeline::graphics::multisample::MultisampleState;
@@ -38,6 +35,8 @@ mod consts;
 mod renderer_error;
 pub use renderer_error::*;
 
+use crate::app::CanvasSize;
+
 use self::types::Position;
 
 /// Holds the entire state of Hexil's rendering system. It probably doesn't make sense to ever make more than one of this, but technically nothing is stopping you.
@@ -54,29 +53,46 @@ pub struct Renderer {
     allocator: Arc<vk::memory::allocator::StandardMemoryAllocator>,
 }
 
-mod vert {
+// mod vert {
+//     vulkano_shaders::shader! {
+//         ty: "vertex",
+//         path: "src/shaders/canvas_vert.glsl",
+//     }
+// }
+mod hex_vert {
     vulkano_shaders::shader! {
         ty: "vertex",
-        path: "src/shaders/canvas_vert.glsl",
+        path: "src/shaders/hex_vert.glsl",
     }
 }
-mod frag {
+mod tile_frag {
     vulkano_shaders::shader! {
         ty: "fragment",
-        path: "src/shaders/canvas_frag.glsl",
+        path: "src/shaders/tile_frag.glsl",
     }
 }
+// mod frag {
+//     vulkano_shaders::shader! {
+//         ty: "fragment",
+//         path: "src/shaders/canvas_frag.glsl",
+//     }
+// }
 
 impl Renderer {
-    #[instrument(skip_all)]
-    #[log_tries(tracing::error)]
     fn make_pipeline(
         &self,
         vert: Arc<vk::shader::ShaderModule>,
         frag: Arc<vk::shader::ShaderModule>,
         render_pass: Arc<vk::render_pass::RenderPass>,
         viewport: &Viewport,
-    ) -> Result<Arc<vk::pipeline::GraphicsPipeline>, RendererError> {
+    ) -> Result<
+        (
+            Arc<vk::pipeline::GraphicsPipeline>,
+            Arc<vk::pipeline::PipelineLayout>,
+        ),
+        RendererError,
+    > {
+        let _guard = tracing::info_span!("make_pipeline").entered();
         // A Vulkan shader can in theory contain multiple entry points, so we have to specify
         // which one.
         let vs = vert
@@ -93,6 +109,50 @@ impl Renderer {
             PipelineShaderStageCreateInfo::new(fs),
         ];
 
+        const fn check_canvas_size_type_layout() -> u32 {
+            if std::mem::size_of::<CanvasSize>() % 4 != 0 {
+                panic!("The size of CanvasSize must be a multiple of 4 bytes!")
+            } else if std::mem::size_of::<CanvasSize>() > (u32::MAX as usize) {
+                panic!("The size of CanvasSize must fit into a u32!! (Why is it even close???)")
+            } else {
+                std::mem::size_of::<CanvasSize>() as u32
+            }
+        } // By const-panicking, we trigger a compile time error!
+        const CANVAS_SIZE_LAYOUT_SIZE: u32 = check_canvas_size_type_layout();
+        let canvas_size_binding = vk::descriptor_set::layout::DescriptorSetLayoutBinding {
+            binding_flags: vk::descriptor_set::layout::DescriptorBindingFlags::UPDATE_AFTER_BIND,
+            descriptor_count: CANVAS_SIZE_LAYOUT_SIZE,
+            stages: vk::shader::ShaderStages::VERTEX,
+            ..vk::descriptor_set::layout::DescriptorSetLayoutBinding::descriptor_type(
+                vk::descriptor_set::layout::DescriptorType::InlineUniformBlock, // I am assuming that the entire buffer is being considered a single descriptor which is an array.
+            )
+        };
+
+        let palette_binding = vk::descriptor_set::layout::DescriptorSetLayoutBinding {
+            binding_flags: vk::descriptor_set::layout::DescriptorBindingFlags::UPDATE_AFTER_BIND,
+            descriptor_count: 1,
+            stages: vk::shader::ShaderStages::VERTEX,
+            ..vk::descriptor_set::layout::DescriptorSetLayoutBinding::descriptor_type(
+                vk::descriptor_set::layout::DescriptorType::UniformTexelBuffer, // I am assuming that the entire buffer is being considered a single descriptor which is an array.
+            )
+        };
+
+        let indices_binding = vk::descriptor_set::layout::DescriptorSetLayoutBinding {
+            binding_flags: vk::descriptor_set::layout::DescriptorBindingFlags::UPDATE_AFTER_BIND,
+            descriptor_count: 1,
+            stages: vk::shader::ShaderStages::VERTEX,
+            ..vk::descriptor_set::layout::DescriptorSetLayoutBinding::descriptor_type(
+                vk::descriptor_set::layout::DescriptorType::UniformTexelBuffer, // I am assuming that the entire buffer is being considered a single descriptor which is an array.
+            )
+        };
+
+        let descriptors_layout = vk::descriptor_set::layout::DescriptorSetLayoutCreateInfo {
+            flags:
+                vk::descriptor_set::layout::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL,
+            bindings: BTreeMap::from([(0, palette_binding), (1, indices_binding)]),
+            ..Default::default()
+        };
+
         let layout = PipelineLayout::new(
             self.logical_device.clone(),
             PipelineDescriptorSetLayoutCreateInfo::from_stages(&stages)
@@ -107,34 +167,37 @@ impl Renderer {
         input_assembly_state.topology =
             vk::pipeline::graphics::input_assembly::PrimitiveTopology::TriangleFan;
         let input_assembly_state = Some(input_assembly_state);
-        Ok(GraphicsPipeline::new(
-            self.logical_device.clone(),
-            None,
-            GraphicsPipelineCreateInfo {
-                // The stages of our pipeline, we have vertex and fragment stages.
-                stages: stages.into_iter().collect(),
-                // Describes the layout of the vertex input and how should it behave.
-                vertex_input_state: Some(vertex_input_state),
-                // Indicate the type of the primitives (the default is a list of triangles).
-                input_assembly_state,
-                // Set the fixed viewport.
-                viewport_state: Some(ViewportState {
-                    viewports: [viewport.clone()].into(),
-                    ..Default::default()
-                }),
-                // Ignore these for now.
-                rasterization_state: Some(RasterizationState::default()),
-                multisample_state: Some(MultisampleState::default()),
-                color_blend_state: Some(ColorBlendState::with_attachment_states(
-                    subpass.num_color_attachments(),
-                    ColorBlendAttachmentState::default(),
-                )),
-                // This graphics pipeline object concerns the first pass of the render pass.
-                subpass: Some(subpass.into()),
-                dynamic_state,
-                ..GraphicsPipelineCreateInfo::layout(layout)
-            },
-        )?)
+        Ok((
+            GraphicsPipeline::new(
+                self.logical_device.clone(),
+                None,
+                GraphicsPipelineCreateInfo {
+                    // The stages of our pipeline, we have vertex and fragment stages.
+                    stages: stages.into_iter().collect(),
+                    // Describes the layout of the vertex input and how should it behave.
+                    vertex_input_state: Some(vertex_input_state),
+                    // Indicate the type of the primitives (the default is a list of triangles).
+                    input_assembly_state,
+                    // Set the fixed viewport.
+                    viewport_state: Some(ViewportState {
+                        viewports: [viewport.clone()].into(),
+                        ..Default::default()
+                    }),
+                    // Ignore these for now.
+                    rasterization_state: Some(RasterizationState::default()),
+                    multisample_state: Some(MultisampleState::default()),
+                    color_blend_state: Some(ColorBlendState::with_attachment_states(
+                        subpass.num_color_attachments(),
+                        ColorBlendAttachmentState::default(),
+                    )),
+                    // This graphics pipeline object concerns the first pass of the render pass.
+                    subpass: Some(subpass.into()),
+                    dynamic_state,
+                    ..GraphicsPipelineCreateInfo::layout(layout.clone())
+                },
+            )?,
+            layout,
+        ))
     }
 }
 
@@ -149,11 +212,11 @@ pub enum RenderCommand {
 }
 
 /// Runs Hexil's rendering system. Should be run in it's own dedicated OS thread.
-#[instrument(skip_all)]
 pub fn render_thread(
     window: Arc<Window>,
     render_command_channel: std::sync::mpsc::Receiver<RenderCommand>,
 ) -> Result<(), renderer_error::RendererError> {
+    let _guard = tracing::info_span!("render_thread").entered();
     use try_log::try_or_err;
     use window_wrappers::SwapchainWrapper;
     window.set_visible(true);
@@ -164,9 +227,14 @@ pub fn render_thread(
     }
     let renderer = try_or_err!(renderer);
 
+    // let CANVIEW: hex_vert::constants = hex_vert::constants {
+    //     canvas_size: [2, 2],
+    //     canvas_scale: 0.4.into(),
+    //     canvas_offset: [0.0, 0.0],
+    // };
     let mut swapchain_wrapper = try_or_err!(SwapchainWrapper::make_canvas_swapchain(
         &renderer,
-        window.inner_size().into()
+        window.inner_size().into(),
     ));
 
     loop {

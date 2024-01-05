@@ -1,14 +1,13 @@
 mod pipeline_wrapper;
-use tracing::instrument;
-use try_log::log_tries;
+use try_log::try_or_err;
 use vulkano as vk;
 
 use vk::buffer::Subbuffer;
 
-use super::frag;
 use super::RendererError;
 
-use super::vert;
+use super::hex_vert;
+use super::tile_frag;
 
 use super::framebuffer::make_framebuffers;
 
@@ -30,8 +29,6 @@ pub(super) struct SwapchainWrapper {
 }
 
 impl SwapchainWrapper {
-    #[instrument(skip_all)]
-    #[log_tries(tracing::error)]
     pub fn new(
         renderer: &Renderer,
         size: [u32; 2],
@@ -39,6 +36,7 @@ impl SwapchainWrapper {
         frag: Arc<vk::shader::ShaderModule>,
         vertex_buffer: Subbuffer<[Position]>,
     ) -> Result<Option<SwapchainWrapper>, RendererError> {
+        let _guard = tracing::info_span!("SwapchainWrapper::new").entered();
         let viewport = Viewport {
             offset: [0.0, 0.0],
             extent: size.map(|f| f as f32),
@@ -75,13 +73,12 @@ impl SwapchainWrapper {
         }))
     }
 
-    #[instrument(skip_all)]
-    #[log_tries(tracing::error)]
     pub fn rebuild(
         self,
         renderer: &Renderer,
         size: [u32; 2],
     ) -> Result<Option<SwapchainWrapper>, RendererError> {
+        let _guard = tracing::info_span!("SwapchainWrapper::rebuild").entered();
         let viewport = Viewport {
             offset: [0.0, 0.0],
             extent: size.map(|f| f as f32),
@@ -115,7 +112,6 @@ impl SwapchainWrapper {
     }
 }
 
-#[allow(dead_code)]
 const SQUARE: [Position; 6] = [
     Position {
         position: [0.0, 0.0],
@@ -166,12 +162,11 @@ const HEXAGON: [Position; 8] = [
 ];
 
 impl SwapchainWrapper {
-    #[instrument(skip(renderer))]
-    #[log_tries(tracing::error)]
     pub(super) fn make_canvas_swapchain(
         renderer: &Renderer,
         size: [u32; 2],
     ) -> Result<Option<SwapchainWrapper>, RendererError> {
+        let _guard = tracing::info_span!("SwapchainWrapper::make_canvas_swapchain").entered();
         let vertex_buffer = vk::buffer::Buffer::from_iter(
             renderer.allocator.clone(),
             vk::buffer::BufferCreateInfo {
@@ -183,11 +178,23 @@ impl SwapchainWrapper {
                     | vk::memory::allocator::MemoryTypeFilter::HOST_SEQUENTIAL_WRITE,
                 ..Default::default()
             },
-            HEXAGON,
+            SQUARE,
         )?;
-
-        let vert: Arc<vk::shader::ShaderModule> = vert::load(renderer.logical_device.clone())?;
-        let frag: Arc<vk::shader::ShaderModule> = frag::load(renderer.logical_device.clone())?;
+        use tracing::error;
+        let vert: Arc<vk::shader::ShaderModule> =
+            match hex_vert::load(renderer.logical_device.clone()) {
+                Ok(expr) => expr,
+                Err(vk::Validated::ValidationError(err)) => {
+                    error!("Try expression failed with: {}", err);
+                    return Err(err.into());
+                }
+                Err(vk::Validated::Error(err)) => {
+                    error!("Try expression failed with: {}", err);
+                    return Err(err.into());
+                }
+            };
+        let frag: Arc<vk::shader::ShaderModule> =
+            try_or_err!(tile_frag::load(renderer.logical_device.clone()));
 
         Ok(SwapchainWrapper::new(
             &renderer,

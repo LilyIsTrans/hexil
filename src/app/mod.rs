@@ -26,16 +26,26 @@ pub enum GridType {
     Hexagonal,
 }
 
+/// The size of the canvas, in tiles
 #[derive(Debug, Hash, Copy, Clone, bytemuck::Zeroable, bytemuck::Pod, Serialize, Deserialize)]
 #[repr(C)]
 pub struct CanvasSize {
-    pub width: u64,
-    pub height: u64,
+    pub width: u32,
+    pub height: u32,
+}
+/// The position and scale of the current view into the canvas. Should have the same aspect ratio as the corresponding screen region to avoid distortion.
+#[derive(Debug, Copy, Clone, bytemuck::Zeroable, bytemuck::Pod, Serialize, Deserialize)]
+#[repr(C)]
+pub struct CanvasViewRect {
+    pub top: f32,
+    pub left: f32,
+    pub width: f32,
+    pub height: f32,
 }
 
 impl CanvasSize {
     #[inline(always)]
-    pub const fn area(&self) -> u64 {
+    pub const fn area(&self) -> u32 {
         self.width * self.height
     }
 }
