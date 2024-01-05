@@ -65,7 +65,7 @@ pub(crate) fn get_command_buffers(
                 .bind_pipeline_graphics(pipeline.clone())?
                 .bind_vertex_buffers(0, vertex_buffer.clone())?
                 .set_viewport(0, smallvec![viewport.clone()])?
-                .draw(vertex_buffer.len() as u32, 1, 0, 0)?
+                .draw(vertex_buffer.len() as u32, 300, 0, 0)?
                 .end_render_pass(SubpassEndInfo::default())?;
 
             Ok(builder.build()?)
