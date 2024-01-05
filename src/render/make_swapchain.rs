@@ -8,7 +8,7 @@ use vk::swapchain::ColorSpace;
 use vulkano as vk;
 
 impl Renderer {
-    #[instrument(skip_all)]
+    #[instrument(skip(self, old_swapchain))]
     #[log_tries(tracing::error)]
     /// Wraps the process of building a new swapchain for a window.
     pub(crate) fn make_swapchain(

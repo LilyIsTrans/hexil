@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 use vk::command_buffer::allocator::StandardCommandBufferAllocator;
 
-#[instrument(skip_all)]
+#[instrument(skip(command_buffer_allocator, queue, pipeline, framebuffers, vertex_buffer))]
 #[log_tries(tracing::error)]
 pub(crate) fn get_command_buffers(
     command_buffer_allocator: &StandardCommandBufferAllocator,

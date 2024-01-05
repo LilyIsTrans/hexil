@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use super::renderer_error;
 
-use palette::chromatic_adaptation::AdaptInto;
 use try_log::log_tries;
 use vulkano as vk;
 

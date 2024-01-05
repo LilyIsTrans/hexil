@@ -13,7 +13,7 @@ use super::Renderer;
 
 impl Renderer {
     /// Wraps the process of acquiring a Vulkan Library (a given installation of Vulkan).
-    #[instrument(skip_all)]
+    #[instrument]
     #[log_tries(tracing::error)]
     pub(crate) fn get_vulkan_library() -> Result<Arc<VulkanLibrary>, renderer_error::RendererError>
     {
@@ -30,7 +30,7 @@ impl Renderer {
         {
             let _guard = ext_span.entered();
             for prop in lib.extension_properties() {
-                tracing::info!(
+                tracing::debug!(
                     "Extension support detected: {} version {}",
                     prop.extension_name,
                     prop.spec_version

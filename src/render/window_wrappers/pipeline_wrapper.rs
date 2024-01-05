@@ -17,15 +17,13 @@ use vk::buffer::Subbuffer;
 use std::sync::Arc;
 
 pub(in crate::render) struct PipelineWrapper {
-    pub(crate) vert: Arc<vk::shader::ShaderModule>,
-    pub(crate) frag: Arc<vk::shader::ShaderModule>,
     pub(crate) vertex_buffer: vk::buffer::Subbuffer<[Position]>,
     pub(crate) pipeline: Arc<vk::pipeline::GraphicsPipeline>,
     pub(crate) command_buffers: Vec<Arc<vk::command_buffer::PrimaryAutoCommandBuffer>>,
 }
 
 impl PipelineWrapper {
-    #[instrument(skip_all)]
+    #[instrument(skip(renderer, vert, frag, vertex_buffer, render_pass, framebuffers))]
     #[log_tries(tracing::error)]
     pub fn new(
         renderer: &Renderer,
@@ -49,14 +47,12 @@ impl PipelineWrapper {
         )?;
 
         Ok(Self {
-            vert,
-            frag,
             vertex_buffer,
             pipeline,
             command_buffers,
         })
     }
-    #[instrument(skip_all)]
+    #[instrument(skip(self, renderer, framebuffers))]
     #[log_tries(tracing::error)]
     pub fn rebuild(
         self,

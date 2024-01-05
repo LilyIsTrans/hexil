@@ -12,7 +12,6 @@ mod select_physical_device;
 mod subpass;
 mod surface_create;
 mod window_wrappers;
-use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::{error, instrument, trace};
 
@@ -20,7 +19,7 @@ use try_log::log_tries;
 use vk::pipeline::graphics::color_blend::{ColorBlendAttachmentState, ColorBlendState};
 use vk::pipeline::graphics::input_assembly::InputAssemblyState;
 use vk::pipeline::graphics::multisample::MultisampleState;
-use vk::pipeline::graphics::rasterization::{LineRasterizationMode, RasterizationState};
+use vk::pipeline::graphics::rasterization::RasterizationState;
 use vk::pipeline::graphics::vertex_input::{Vertex, VertexDefinition};
 use vk::pipeline::graphics::viewport::{Viewport, ViewportState};
 use vk::pipeline::graphics::GraphicsPipelineCreateInfo;

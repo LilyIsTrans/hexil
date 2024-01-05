@@ -115,6 +115,7 @@ impl SwapchainWrapper {
     }
 }
 
+#[allow(dead_code)]
 const SQUARE: [Position; 6] = [
     Position {
         position: [0.0, 0.0],
@@ -136,6 +137,7 @@ const SQUARE: [Position; 6] = [
     },
 ];
 
+#[allow(dead_code)]
 const HEXAGON: [Position; 8] = [
     Position {
         position: [0.0, 0.0],
@@ -164,7 +166,7 @@ const HEXAGON: [Position; 8] = [
 ];
 
 impl SwapchainWrapper {
-    #[instrument(skip_all)]
+    #[instrument(skip(renderer))]
     #[log_tries(tracing::error)]
     pub(super) fn make_canvas_swapchain(
         renderer: &Renderer,
