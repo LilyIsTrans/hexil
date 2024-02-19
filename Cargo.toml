@@ -8,3 +8,8 @@ authors = ["Lily McCabe <lily@lilymccabe.ca"]
 
 
 [dependencies]
+bytemuck = { version = "1.14.3", features = ["derive", "min_const_generics", "extern_crate_std", "must_cast"] }
+palette = { version = "0.7.4", features = ["bytemuck", "serde"] }
+serde = { version = "1.0.196", features = ["derive"] }
+vulkano = { version = "0.34.1", features = ["serde", "document_unchecked"] }
+vulkano-util = "0.34.1"
