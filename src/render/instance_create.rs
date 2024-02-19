@@ -12,7 +12,7 @@ use super::renderer_error;
 use super::Renderer;
 
 impl Renderer {
-    #[instrument(skip_all)]
+    #[instrument(skip_all, err)]
     #[log_tries(tracing::error)]
     /// Wraps the process of acquiring a Vulkan instance.
     pub fn get_instance(

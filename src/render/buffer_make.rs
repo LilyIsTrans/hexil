@@ -7,7 +7,7 @@ use tracing::instrument;
 use vk::buffer as vbuf;
 
 impl Renderer {
-    #[instrument(skip_all)]
+    #[instrument(skip_all, err)]
     #[log_tries(tracing::error)]
     pub(super) fn make_buffer() -> Result<vbuf::Buffer, renderer_error::RendererError> {
         todo!()

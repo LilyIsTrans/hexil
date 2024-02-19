@@ -10,7 +10,7 @@ use super::Renderer;
 
 impl Renderer {
     /// Makes a new `Renderer`.
-    #[instrument(skip_all)]
+    #[instrument(skip_all, err)]
     #[log_tries(tracing::error)]
     pub fn new(window: Arc<winit::window::Window>) -> Result<Self, renderer_error::RendererError> {
         let lib = Self::get_vulkan_library()?;
@@ -33,6 +33,19 @@ impl Renderer {
             vk::command_buffer::allocator::StandardCommandBufferAllocatorCreateInfo::default(),
         );
 
+        let descriptor_alloc_create_info =
+            vk::descriptor_set::allocator::StandardDescriptorSetAllocatorCreateInfo {
+                update_after_bind: true,
+                ..Default::default()
+            };
+
+        let descriptor_allocator =
+            vk::descriptor_set::allocator::StandardDescriptorSetAllocator::new(
+                logical_device.clone(),
+                descriptor_alloc_create_info,
+            )
+            .into();
+
         Ok(Self {
             instance,
             window,
@@ -43,6 +56,7 @@ impl Renderer {
             graphics_queue,
             transfer_queue,
             allocator,
+            descriptor_allocator,
         })
     }
 }

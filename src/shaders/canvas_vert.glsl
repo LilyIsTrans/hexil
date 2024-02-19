@@ -3,15 +3,28 @@
 layout(location = 0) in vec2 position;
 layout(location = 1) out vec3 color;
 
-const uint WIDTH = 20;
-const uint HEIGHT = 15;
+layout(set = 0, binding = 0) readonly buffer CanvasSettings {
+    uint WIDTH;
+    uint HEIGHT;
+    vec3 palette[];
+} Settings;
+layout(set = 0, binding = 1) readonly buffer CanvasIndices {
+    uint indices[];
+} Indices;
+
+
+
 
 vec2 transform_one(vec2 initial) {
-    vec2 pos = initial / (vec2(0.75 * WIDTH, HEIGHT));
-    vec2 offset = (vec2(0.75) / (vec2(0.75 * WIDTH, HEIGHT)))  + vec2((2.f * vec2((gl_InstanceIndex % WIDTH), (gl_InstanceIndex / WIDTH) + (gl_InstanceIndex % 2) / 2.f )) / vec2(WIDTH, HEIGHT)) - 1.f;
-    return pos + offset;
+    vec2 scaled_pos = initial / vec2(Settings.WIDTH * 0.75, Settings.HEIGHT);
+    float column_offset = ((gl_InstanceIndex % 2) / 2.f);
+    vec2 grid_offset = 2.f * (vec2(gl_InstanceIndex % Settings.WIDTH, (gl_InstanceIndex / Settings.WIDTH + column_offset)) + 0.5f);
+    vec2 top_left = vec2(-1.f);
+    vec2 canvas_size = vec2(Settings.WIDTH, Settings.HEIGHT);
+    vec2 offset = top_left + (grid_offset / canvas_size);
+    
+    return scaled_pos + offset;
 }
-
 
 void main() {
     vec2 offsets[2] = vec2[2](

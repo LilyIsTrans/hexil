@@ -8,7 +8,7 @@ use vk::{
 };
 use vulkano as vk;
 
-#[instrument(skip_all)]
+#[instrument(skip_all, err)]
 #[log_tries(tracing::error)]
 pub(super) fn make_framebuffers(
     images: &Vec<Arc<vk::image::Image>>,

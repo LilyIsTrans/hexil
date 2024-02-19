@@ -5,6 +5,7 @@ use vulkano as vk;
 
 use vk::buffer::Subbuffer;
 
+use super::canvas_manager::CanvasBuffersManager;
 use super::frag;
 use super::RendererError;
 
@@ -30,7 +31,7 @@ pub(super) struct SwapchainWrapper {
 }
 
 impl SwapchainWrapper {
-    #[instrument(skip_all)]
+    #[instrument(skip_all, err)]
     #[log_tries(tracing::error)]
     pub fn new(
         renderer: &Renderer,
@@ -38,6 +39,7 @@ impl SwapchainWrapper {
         vert: Arc<vk::shader::ShaderModule>,
         frag: Arc<vk::shader::ShaderModule>,
         vertex_buffer: Subbuffer<[Position]>,
+        manager: &CanvasBuffersManager,
     ) -> Result<Option<SwapchainWrapper>, RendererError> {
         let viewport = Viewport {
             offset: [0.0, 0.0],
@@ -65,6 +67,7 @@ impl SwapchainWrapper {
             &render_pass,
             viewport,
             &framebuffers,
+            manager,
         )?;
 
         Ok(Some(Self {
@@ -75,12 +78,13 @@ impl SwapchainWrapper {
         }))
     }
 
-    #[instrument(skip_all)]
+    #[instrument(skip_all, err)]
     #[log_tries(tracing::error)]
     pub fn rebuild(
         self,
         renderer: &Renderer,
         size: [u32; 2],
+        manager: &CanvasBuffersManager,
     ) -> Result<Option<SwapchainWrapper>, RendererError> {
         let viewport = Viewport {
             offset: [0.0, 0.0],
@@ -105,7 +109,9 @@ impl SwapchainWrapper {
         let framebuffers: Vec<Arc<Framebuffer>> =
             make_framebuffers(&swapchain_images, render_pass.clone())?;
 
-        let pipeline = self.pipeline.rebuild(&renderer, viewport, &framebuffers)?;
+        let pipeline = self
+            .pipeline
+            .rebuild(&renderer, viewport, &framebuffers, manager)?;
         Ok(Some(Self {
             swapchain,
             swapchain_images,
@@ -166,11 +172,11 @@ const HEXAGON: [Position; 8] = [
 ];
 
 impl SwapchainWrapper {
-    #[instrument(skip(renderer))]
     #[log_tries(tracing::error)]
     pub(super) fn make_canvas_swapchain(
         renderer: &Renderer,
         size: [u32; 2],
+        manager: &CanvasBuffersManager,
     ) -> Result<Option<SwapchainWrapper>, RendererError> {
         let vertex_buffer = vk::buffer::Buffer::from_iter(
             renderer.allocator.clone(),
@@ -195,6 +201,7 @@ impl SwapchainWrapper {
             vert.clone(),
             frag.clone(),
             vertex_buffer,
+            manager,
         )?)
     }
 }

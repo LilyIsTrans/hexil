@@ -9,6 +9,7 @@ use vulkano as vk;
 
 impl Renderer {
     /// Wraps the process of building a new swapchain for a window.
+    #[instrument(skip_all, err)]
     pub(crate) fn make_swapchain(
         &self,
         old_swapchain: Option<(Arc<vk::swapchain::Swapchain>, Vec<Arc<vk::image::Image>>)>,
