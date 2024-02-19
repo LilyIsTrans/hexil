@@ -1,0 +1,10 @@
+[package]
+name = "hexil"
+version = "0.2.0"
+edition = "2021"
+authors = ["Lily McCabe <lily@lilymccabe.ca"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[dependencies]
