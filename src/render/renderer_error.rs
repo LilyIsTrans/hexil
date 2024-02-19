@@ -10,11 +10,11 @@ pub enum RendererError {
     #[error(transparent)]
     VkLoadErr(#[from] vk::LoadingError),
     #[error(transparent)]
+    HostAccessErr(#[from] vk::sync::HostAccessError),
+    #[error(transparent)]
     VkErr(#[from] vk::VulkanError),
     #[error(transparent)]
-    ValidVkErr(#[from] vk::Validated<vk::VulkanError>),
-    #[error(transparent)]
-    ValidBufErr(#[from] vk::Validated<vk::buffer::AllocateBufferError>),
+    BufErr(#[from] vk::buffer::AllocateBufferError),
     #[error(transparent)]
     WindowHandleError(#[from] winit::raw_window_handle::HandleError),
     #[error("No physical devices? At all!? Seriously, as far as this program can tell, you must be reading this through a serial port, which like, props, but what on earth made you think a pixel art program would work with that?")]
@@ -37,4 +37,16 @@ pub enum RendererError {
     PipelineCreateInfoErr(#[from] IntoPipelineLayoutCreateInfoError),
     #[error(transparent)]
     RecvErr(#[from] std::sync::mpsc::RecvError),
+}
+
+impl<T> From<vk::Validated<T>> for RendererError
+where
+    RendererError: From<T>,
+{
+    fn from(value: vk::Validated<T>) -> Self {
+        match value {
+            vk::Validated::Error(err) => Self::from(err),
+            vk::Validated::ValidationError(err) => Self::VkValidationErr(err),
+        }
+    }
 }

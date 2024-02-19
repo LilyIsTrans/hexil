@@ -11,7 +11,7 @@ use tracing::instrument;
 
 impl Renderer {
     /// Wraps the process of creating a Vulkan graphics pipeline.
-    #[instrument(skip_all)]
+    #[instrument(skip_all, err)]
     #[log_tries(tracing::error)]
     pub(super) fn make_gfx_pipeline(
         device: Arc<vk::device::Device>,

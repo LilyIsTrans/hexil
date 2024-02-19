@@ -12,8 +12,8 @@ use super::Renderer;
 
 impl Renderer {
     /// On success, returns a tuple `(device, transfer_queue, graphics_queue)`.
-    #[instrument(skip_all)]
-    #[log_tries(tracing::error)]
+    // #[instrument(skip_all, err)]
+    // #[log_tries(tracing::error)]
     pub(crate) fn get_queues_and_device(
         physical_device: Arc<vk::device::physical::PhysicalDevice>,
     ) -> Result<
@@ -101,15 +101,38 @@ impl Renderer {
             queue_create_infos.push(transfer_queue_create_info);
         };
 
+        let needed_extensions = vk::device::DeviceExtensions {
+            // khr_descriptor_update_template: todo!(),
+            // khr_format_feature_flags2: todo!(),
+            // khr_fragment_shading_rate: todo!(),
+            // khr_multiview: todo!(),
+            // khr_present_wait: todo!(),
+            // khr_shader_draw_parameters: todo!(),
+            khr_swapchain: true,
+            // ext_conditional_rendering: todo!(),
+            // ext_descriptor_buffer: todo!(),
+            // ext_descriptor_indexing: true, ///////////////
+            // ext_fragment_density_map: todo!(),
+            // ext_fragment_density_map2: todo!(),
+            // ext_full_screen_exclusive: todo!(),
+            // ext_hdr_metadata: todo!(), //////////////
+            // ext_line_rasterization: todo!(), ///////////
+            ext_pageable_device_local_memory: false,
+            ..Default::default()
+        };
+
+        let needed_features = vk::device::Features {
+            descriptor_binding_uniform_buffer_update_after_bind: true,
+            ..Default::default()
+        };
+
         let logical_device = vk::device::DeviceCreateInfo {
             queue_create_infos,
             enabled_extensions: physical_device
                 .supported_extensions()
-                .intersection(&super::consts::ALL_KHR_DEVICE_EXTENSIONS),
-            // enabled_features: Features {
-            //     bresenham_lines: true,
-            //     ..Default::default()
-            // },
+                .intersection(&super::consts::ALL_KHR_DEVICE_EXTENSIONS.clone())
+                .union(&needed_extensions),
+            enabled_features: needed_features,
             ..Default::default()
         };
 

@@ -16,6 +16,7 @@ use std::sync::Arc;
 use tracing::{error, instrument, trace};
 
 use try_log::log_tries;
+use vk::memory::allocator::MemoryAllocator;
 use vk::pipeline::graphics::color_blend::{ColorBlendAttachmentState, ColorBlendState};
 use vk::pipeline::graphics::input_assembly::InputAssemblyState;
 use vk::pipeline::graphics::multisample::MultisampleState;
@@ -23,7 +24,9 @@ use vk::pipeline::graphics::rasterization::RasterizationState;
 use vk::pipeline::graphics::vertex_input::{Vertex, VertexDefinition};
 use vk::pipeline::graphics::viewport::{Viewport, ViewportState};
 use vk::pipeline::graphics::GraphicsPipelineCreateInfo;
-use vk::pipeline::layout::PipelineDescriptorSetLayoutCreateInfo;
+use vk::pipeline::layout::{
+    PipelineDescriptorSetLayoutCreateInfo, PipelineLayoutCreateFlags, PipelineLayoutCreateInfo,
+};
 use vk::pipeline::{GraphicsPipeline, PipelineLayout, PipelineShaderStageCreateInfo};
 use vk::render_pass::Subpass;
 use vk::swapchain::SwapchainPresentInfo;
@@ -37,6 +40,8 @@ mod consts;
 
 mod renderer_error;
 pub use renderer_error::*;
+
+use crate::render::canvas_manager::CanvasBuffersManager;
 
 use self::types::Position;
 
@@ -52,6 +57,7 @@ pub struct Renderer {
     graphics_queue: Arc<vk::device::Queue>,
     transfer_queue: Arc<vk::device::Queue>,
     allocator: Arc<vk::memory::allocator::StandardMemoryAllocator>,
+    descriptor_allocator: Arc<vk::descriptor_set::allocator::StandardDescriptorSetAllocator>,
 }
 
 mod vert {
@@ -60,6 +66,8 @@ mod vert {
         path: "src/shaders/canvas_vert.glsl",
     }
 }
+
+pub(crate) mod canvas_manager;
 mod frag {
     vulkano_shaders::shader! {
         ty: "fragment",
@@ -68,7 +76,7 @@ mod frag {
 }
 
 impl Renderer {
-    #[instrument(skip_all)]
+    #[instrument(skip_all, err)]
     #[log_tries(tracing::error)]
     fn make_pipeline(
         &self,
@@ -146,10 +154,12 @@ pub enum RenderCommand {
     WindowResized([u32; 2]),
     /// The renderer should shut down gracefully
     Shutdown,
+    CanvasSettingsChanged,
+    CanvasIndicesChanged,
 }
 
 /// Runs Hexil's rendering system. Should be run in it's own dedicated OS thread.
-#[instrument(skip_all)]
+#[instrument(skip_all, err)]
 pub fn render_thread(
     window: Arc<Window>,
     render_command_channel: std::sync::mpsc::Receiver<RenderCommand>,
@@ -163,10 +173,12 @@ pub fn render_thread(
         return Err(e);
     }
     let renderer = try_or_err!(renderer);
+    let manager = CanvasBuffersManager::new(&renderer, 20, 15, 7)?;
 
     let mut swapchain_wrapper = try_or_err!(SwapchainWrapper::make_canvas_swapchain(
         &renderer,
-        window.inner_size().into()
+        window.inner_size().into(),
+        &manager
     ));
 
     loop {
@@ -187,20 +199,21 @@ pub fn render_thread(
                             Err(e) => return Err(e.into()),
                         };
 
-                    let execution = try_or_err!(vk::sync::now(renderer.logical_device.clone())
+                    let execution = vk::sync::now(renderer.logical_device.clone())
                         .join(acquire_future)
                         .then_execute(
                             renderer.graphics_queue.clone(),
-                            swapchain_wrapper.pipeline.command_buffers[image_i as usize].clone(),
-                        ))
-                    .then_swapchain_present(
-                        renderer.graphics_queue.clone(),
-                        SwapchainPresentInfo::swapchain_image_index(
-                            swapchain_wrapper.swapchain.clone(),
-                            image_i,
-                        ),
-                    )
-                    .then_signal_fence_and_flush();
+                            swapchain_wrapper.pipeline.command_buffers.drawing[image_i as usize]
+                                .clone(),
+                        )?
+                        .then_swapchain_present(
+                            renderer.graphics_queue.clone(),
+                            SwapchainPresentInfo::swapchain_image_index(
+                                swapchain_wrapper.swapchain.clone(),
+                                image_i,
+                            ),
+                        )
+                        .then_signal_fence_and_flush();
                     if let Ok(execution) = execution {
                         try_or_err!(execution.wait(None));
                     } else {
@@ -214,12 +227,38 @@ pub fn render_thread(
             }
             Ok(RenderCommand::WindowResized(new_size)) => {
                 swapchain_wrapper = try_or_err!(if swapchain_wrapper.is_some() {
-                    swapchain_wrapper.unwrap().rebuild(&renderer, new_size)
+                    swapchain_wrapper
+                        .unwrap()
+                        .rebuild(&renderer, new_size, &manager)
                 } else {
-                    SwapchainWrapper::make_canvas_swapchain(&renderer, new_size)
+                    SwapchainWrapper::make_canvas_swapchain(&renderer, new_size, &manager)
                 });
             }
             Ok(RenderCommand::Shutdown) => return Ok(()),
+            Ok(RenderCommand::CanvasSettingsChanged) => {
+                if let Some(swapchain_wrapper) = &swapchain_wrapper {
+                    let execution = vk::sync::now(renderer.logical_device.clone())
+                        .then_execute(
+                            renderer.transfer_queue.clone(),
+                            swapchain_wrapper.pipeline.command_buffers.transfer.clone(),
+                        )?
+                        .then_signal_semaphore_and_flush()?;
+                } else {
+                    tracing::warn!("The canvas settings changed, but the swapchain doesn't exist. That probably shouldn't be possible.")
+                }
+            }
+            Ok(RenderCommand::CanvasIndicesChanged) => {
+                if let Some(swapchain_wrapper) = &swapchain_wrapper {
+                    let execution = vk::sync::now(renderer.logical_device.clone())
+                        .then_execute(
+                            renderer.transfer_queue.clone(),
+                            swapchain_wrapper.pipeline.command_buffers.transfer.clone(),
+                        )?
+                        .then_signal_semaphore_and_flush()?;
+                } else {
+                    tracing::warn!("The canvas settings changed, but the swapchain doesn't exist. That probably shouldn't be possible.")
+                }
+            }
         }
     }
 }

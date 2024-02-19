@@ -43,7 +43,7 @@ impl From<OsError> for WindowingError {
 pub enum WindowCommand {}
 
 /// Makes an event loop suitable for Hexil.
-#[instrument(skip_all)]
+#[instrument(skip_all, err)]
 #[log_tries(tracing::error)]
 pub fn make_event_loop() -> Result<EventLoop<WindowCommand>, EventLoopError> {
     use winit::event_loop::EventLoopBuilder;
@@ -51,7 +51,7 @@ pub fn make_event_loop() -> Result<EventLoop<WindowCommand>, EventLoopError> {
 }
 
 /// Makes a window with the given title and event loop, suitable for Hexil. Hexil won't show it until the renderer is started.
-#[instrument(skip(eloop))]
+#[instrument(skip_all, err)]
 #[log_tries(tracing::error)]
 pub fn make_window(title: &str, eloop: &EventLoop<WindowCommand>) -> Result<Window, OsError> {
     use winit::window::WindowBuilder;
@@ -66,7 +66,7 @@ pub fn make_window(title: &str, eloop: &EventLoop<WindowCommand>) -> Result<Wind
 /// If this function returns, the event loop is dead. Ok(()) means it closed gracefully.
 /// This must be run on the main thread, and will not return until program termination. As such,
 /// any code which runs independently must be initialized to a separate thread before this is called.
-#[instrument]
+#[instrument(err)]
 #[log_tries(tracing::error)]
 pub fn run_event_loop(
     eloop: EventLoop<WindowCommand>,

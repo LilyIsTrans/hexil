@@ -8,9 +8,8 @@ use vk::swapchain::ColorSpace;
 use vulkano as vk;
 
 impl Renderer {
-    #[instrument(skip(self, old_swapchain))]
-    #[log_tries(tracing::error)]
     /// Wraps the process of building a new swapchain for a window.
+    #[instrument(skip_all, err)]
     pub(crate) fn make_swapchain(
         &self,
         old_swapchain: Option<(Arc<vk::swapchain::Swapchain>, Vec<Arc<vk::image::Image>>)>,
@@ -19,6 +18,7 @@ impl Renderer {
         Option<(Arc<vk::swapchain::Swapchain>, Vec<Arc<vk::image::Image>>)>,
         renderer_error::RendererError,
     > {
+        let _guard = tracing::info_span!("make_swapchain").entered();
         if new_size == [0u32, 0u32] {
             Ok(None)
         } else if let Some(swapchain) = old_swapchain {
@@ -26,11 +26,26 @@ impl Renderer {
             create_info.image_extent = new_size;
             Ok(Some(swapchain.0.recreate(create_info)?))
         } else {
-            let mut present_mode = vk::swapchain::PresentMode::Fifo;
-            if *(super::select_physical_device::MAILBOX_MODE.get_or_init(|| false)) {
-                present_mode = vk::swapchain::PresentMode::Mailbox;
-            }
+            let present_mode = if self
+                .physical_device
+                .surface_present_modes(self.surface.as_ref(), Default::default())
+                .is_ok_and(|mut a| a.any(|b| b == vk::swapchain::PresentMode::Mailbox))
+            {
+                vk::swapchain::PresentMode::Mailbox
+            } else {
+                vk::swapchain::PresentMode::Fifo
+            };
+            let scaling_behavior = if self
+                .logical_device
+                .enabled_extensions()
+                .ext_swapchain_maintenance1
+            {
+                Some(vk::swapchain::PresentScaling::AspectRatioStretch)
+            } else {
+                None
+            };
             let swapchain = vk::swapchain::SwapchainCreateInfo {
+                scaling_behavior,
                 image_format: self
                     .physical_device
                     .surface_formats(&self.surface, Default::default())?

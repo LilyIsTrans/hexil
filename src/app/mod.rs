@@ -51,48 +51,20 @@ pub struct ProjectV1 {
     /// Which grid type the project uses
     gridtype: GridType,
 }
+pub(crate) type Color = palette::Oklab;
+pub(crate) type Palette = Vec<Color>;
 
-#[derive(Debug, Clone)]
-/// A canvas for a `ProjectV1` layer
-/// It is an invariant of this type that all the subbuffers are HOST_RANDOM_ACCESS, and are never written by the device. If you don't know what that means, don't worry about it.
-pub enum LayerV1Canvas {
-    /// A canvas of alpha blending values.
-    Alpha(vbuf::Subbuffer<[f32]>),
-    /// A canvas of base colours, with an associated palette.
-    BaseColor {
-        palette: vbuf::Subbuffer<[palette::Oklab]>,
-        canvas: vbuf::Subbuffer<[u32]>,
-    },
-    /// A canvas of shading steps (positive: brighten, negative: darken)
-    Shading(vbuf::Subbuffer<[i32]>),
-}
+pub(crate) type CanvasIndices = Vec<u32>;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 /// It is fundamentally impossible to deserialize a data structure involving subbuffers with serde. This type exists as a quick and easy go between, so that we can still save projects anyway.
-pub enum LayerV1CanvasHost {
+pub enum LayerV1Canvas {
     Alpha(Vec<f32>),
     BaseColor {
-        palette: Vec<palette::Oklab>,
-        canvas: Vec<u32>,
+        palette: parking_lot::RwLock<Palette>,
+        canvas: parking_lot::RwLock<CanvasIndices>,
     },
     Shading(Vec<i32>),
-}
-
-impl TryFrom<LayerV1Canvas> for LayerV1CanvasHost {
-    type Error = vk::sync::HostAccessError;
-
-    fn try_from(
-        value: LayerV1Canvas,
-    ) -> std::result::Result<LayerV1CanvasHost, vk::sync::HostAccessError> {
-        Ok(match value {
-            LayerV1Canvas::Alpha(buf) => Self::Alpha(buf.read()?.to_vec()),
-            LayerV1Canvas::BaseColor { palette, canvas } => Self::BaseColor {
-                palette: palette.read()?.to_vec(),
-                canvas: canvas.read()?.to_vec(),
-            },
-            LayerV1Canvas::Shading(buf) => Self::Shading(buf.read()?.to_vec()),
-        })
-    }
 }
 
 pub mod transfer_canvas_to_device;

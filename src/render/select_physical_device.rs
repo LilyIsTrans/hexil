@@ -11,8 +11,6 @@ use tracing::instrument;
 
 use super::Renderer;
 
-pub(in crate::render) static MAILBOX_MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-
 fn rank_physical_devices(
     a: &(
         Arc<vk::device::physical::PhysicalDevice>,
@@ -34,7 +32,15 @@ fn rank_physical_devices(
             ) {
                 (true, false) => Ordering::Greater,
                 (false, true) => Ordering::Less,
-                (_, _) => Ordering::Equal, // TODO: Add more checks
+                (_, _) => match (
+                    a.0.supported_extensions().ext_swapchain_maintenance1,
+                    b.0.supported_extensions().ext_swapchain_maintenance1,
+                ) {
+                    (true, true) => Ordering::Equal,
+                    (true, false) => Ordering::Greater,
+                    (false, true) => Ordering::Less,
+                    (false, false) => Ordering::Equal,
+                }, // TODO: Add more checks
             }
         }
         (Ok(_), Err(_)) => Ordering::Greater,
@@ -62,11 +68,6 @@ impl Renderer {
         info!(
             "Selected Physical Device: {}",
             physical_device.properties().device_name
-        );
-        let _ = MAILBOX_MODE.set(
-            physical_device
-                .surface_present_modes(surface, Default::default())
-                .is_ok_and(|mut a| a.any(|b| b == vk::swapchain::PresentMode::Mailbox)),
         );
         Ok(physical_device)
     }
