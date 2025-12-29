@@ -13,6 +13,17 @@ else()
 endif()
 
 
-add_executable(hexil WIN32 hexil.c)
+
+add_executable(hexil WIN32 hexil.c hexil.h)
 
 target_link_libraries(hexil SDL3::SDL3)
+
+
+add_compile_definitions(HEXIL_VERSION="${Hexil_VERSION}" HEXIL_VERSION_MAJOR="${Hexil_VERSION_MAJOR}" HEXIL_VERSION_MINOR="${Hexil_VERSION_MINOR}" HEXIL_VERSION_PATCH="${Hexil_VERSION_PATCH}" HEXIL_VERSION_TWEAK="${Hexil_VERSION_TWEAK}")
+include_directories(.)
+
+add_subdirectory(app_init ./app_init)
+add_subdirectory(app_iterate ./app_iterate)
+add_subdirectory(app_event ./app_event)
+add_subdirectory(app_quit ./app_quit)
+
