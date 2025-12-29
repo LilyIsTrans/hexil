@@ -10,8 +10,64 @@ set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 
+add_custom_command(
+  OUTPUT venv
+  COMMAND python
+  ARGS -m venv ${CMAKE_BINARY_DIR}/venv
+)
+set_source_files_properties(venv SYMBOLIC True)
 
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/include/dcimgui.h ${CMAKE_BINARY_DIR}/dcimgui.cpp
+  BYPRODUCTS ${CMAKE_BINARY_DIR}/dcimgui.json
+  DEPENDS venv
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/vendored/dear_bindings/
+  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/pip
+  ARGS install -r requirements.txt
+  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/python
+  ARGS dear_bindings.py -o ${CMAKE_BINARY_DIR}/dcimgui ${CMAKE_SOURCE_DIR}/vendored/imgui/imgui.h
+  COMMAND cmake
+  ARGS -E make_directory ${CMAKE_BINARY_DIR}/include
+  COMMAND cmake
+  ARGS -E rename ${CMAKE_BINARY_DIR}/dcimgui.h ${CMAKE_BINARY_DIR}/include/dcimgui.h
+)
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/include/dcimgui_impl_sdl3.h ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3.cpp
+  BYPRODUCTS ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3.json
+  DEPENDS venv
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/vendored/dear_bindings/
+  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/pip
+  ARGS install -r requirements.txt
+  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/python
+  ARGS dear_bindings.py --backend -o ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3 ${CMAKE_SOURCE_DIR}/vendored/imgui/backends/imgui_impl_sdl3.h
+  COMMAND cmake
+  ARGS -E make_directory ${CMAKE_BINARY_DIR}/include
+  COMMAND cmake
+  ARGS -E rename ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3.h ${CMAKE_BINARY_DIR}/include/dcimgui_impl_sdl3.h
+)
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/include/dcimgui_impl_sdlgpu3.h ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3.cpp
+  BYPRODUCTS ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3.json
+  DEPENDS venv
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/vendored/dear_bindings/
+  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/pip
+  ARGS install -r requirements.txt
+  COMMAND ${CMAKE_BINARY_DIR}/venv/bin/python
+  ARGS dear_bindings.py --backend -o ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3 ${CMAKE_SOURCE_DIR}/vendored/imgui/backends/imgui_impl_sdlgpu3.h
+  COMMAND cmake
+  ARGS -E make_directory ${CMAKE_BINARY_DIR}/include
+  COMMAND cmake
+  ARGS -E rename ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3.h ${CMAKE_BINARY_DIR}/include/dcimgui_impl_sdlgpu3.h
+)
+
+add_library(dcimgui STATIC
+  ${CMAKE_BINARY_DIR}/dcimgui.cpp 
+  ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3.cpp 
+  ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3.cpp  )
+
+target_include_directories(dcimgui INTERFACE ${CMAKE_BINARY_DIR}/include)
+set_target_properties(dcimgui PROPERTIES LINKER_LANGUAGE C)
 ADD_SUBDIRECTORY(./src ./obj)
 
 
-add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/imgui)
+
