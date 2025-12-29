@@ -1,10 +1,10 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 4.2)
 
-PROJECT(Hexil LANGUAGES C VERSION 0.1.0)
+PROJECT(Hexil VERSION 0.1.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_EXTENSIONS ON)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
@@ -39,7 +39,7 @@ add_custom_command(
   COMMAND ${CMAKE_BINARY_DIR}/venv/bin/pip
   ARGS install -r requirements.txt
   COMMAND ${CMAKE_BINARY_DIR}/venv/bin/python
-  ARGS dear_bindings.py --backend -o ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3 ${CMAKE_SOURCE_DIR}/vendored/imgui/backends/imgui_impl_sdl3.h
+  ARGS dear_bindings.py --include ${CMAKE_SOURCE_DIR}/vendored/imgui/imgui.h --backend -o ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3 ${CMAKE_SOURCE_DIR}/vendored/imgui/backends/imgui_impl_sdl3.h
   COMMAND cmake
   ARGS -E make_directory ${CMAKE_BINARY_DIR}/include
   COMMAND cmake
@@ -53,20 +53,35 @@ add_custom_command(
   COMMAND ${CMAKE_BINARY_DIR}/venv/bin/pip
   ARGS install -r requirements.txt
   COMMAND ${CMAKE_BINARY_DIR}/venv/bin/python
-  ARGS dear_bindings.py --backend -o ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3 ${CMAKE_SOURCE_DIR}/vendored/imgui/backends/imgui_impl_sdlgpu3.h
+  ARGS dear_bindings.py --include ${CMAKE_SOURCE_DIR}/vendored/imgui/imgui.h --backend -o ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3 ${CMAKE_SOURCE_DIR}/vendored/imgui/backends/imgui_impl_sdlgpu3.h
   COMMAND cmake
   ARGS -E make_directory ${CMAKE_BINARY_DIR}/include
   COMMAND cmake
   ARGS -E rename ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3.h ${CMAKE_BINARY_DIR}/include/dcimgui_impl_sdlgpu3.h
 )
+add_custom_command(
+  OUTPUT ${CMAKE_BINARY_DIR}/include/imconfig.h
+  DEPENDS ${CMAKE_SOURCE_DIR}/vendored/imgui/imconfig.h
+  COMMAND cmake
+  ARGS -E make_directory ${CMAKE_BINARY_DIR}/include
+  COMMAND cmake
+  ARGS -E copy -t ${CMAKE_BINARY_DIR}/include ${CMAKE_SOURCE_DIR}/vendored/imgui/imconfig.h
+)
+
+file(GLOB ImGuiSOURCES ${CMAKE_SOURCE_DIR}/vendored/imgui/*.cpp)
 
 add_library(dcimgui STATIC
   ${CMAKE_BINARY_DIR}/dcimgui.cpp 
   ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3.cpp 
-  ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3.cpp  )
+  ${CMAKE_BINARY_DIR}/dcimgui_impl_sdlgpu3.cpp
+  ${ImGuiSOURCES}
+  ${CMAKE_SOURCE_DIR}/vendored/imgui/backends/imgui_impl_sdl3.cpp 
+  ${CMAKE_SOURCE_DIR}/vendored/imgui/backends/imgui_impl_sdlgpu3.cpp
+)
 
-target_include_directories(dcimgui INTERFACE ${CMAKE_BINARY_DIR}/include)
-set_target_properties(dcimgui PROPERTIES LINKER_LANGUAGE C)
+target_sources(dcimgui PUBLIC ${CMAKE_BINARY_DIR}/include/imconfig.h)
+target_include_directories(dcimgui PUBLIC ${CMAKE_BINARY_DIR}/include)
+target_include_directories(dcimgui PRIVATE ${CMAKE_SOURCE_DIR}/vendored/imgui ${CMAKE_SOURCE_DIR}/vendored/imgui/backends)
 ADD_SUBDIRECTORY(./src ./obj)
 
 
