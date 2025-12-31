@@ -1,1 +1,1 @@
-void set_metadata();
+void hexil_set_SDL_metadata();

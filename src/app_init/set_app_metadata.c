@@ -1,7 +1,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_init.h>
 
-void set_metadata() {
+void hexil_set_SDL_metadata() {
   SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING, "Hexil");
   SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_VERSION_STRING, HEXIL_VERSION);
   SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_IDENTIFIER_STRING, "ca.lilymccabe.hexil");

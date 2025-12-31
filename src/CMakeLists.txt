@@ -18,6 +18,10 @@ add_executable(hexil WIN32 hexil.c hexil.h)
 
 target_link_libraries(hexil SDL3::SDL3)
 target_link_libraries(hexil dcimgui)
+target_link_libraries(hexil ${Vulkan_LIBRARIES})
+
+target_include_directories(hexil PUBLIC ${Vulkan_INCLUDE_DIRS})
+
 
 add_compile_definitions(HEXIL_VERSION="${Hexil_VERSION}" HEXIL_VERSION_MAJOR="${Hexil_VERSION_MAJOR}" HEXIL_VERSION_MINOR="${Hexil_VERSION_MINOR}" HEXIL_VERSION_PATCH="${Hexil_VERSION_PATCH}" HEXIL_VERSION_TWEAK="${Hexil_VERSION_TWEAK}")
 include_directories(.)

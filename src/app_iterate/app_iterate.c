@@ -1,6 +1,6 @@
 #include "dcimgui.h"
 #include "dcimgui_impl_sdl3.h"
-#include "dcimgui_impl_sdlgpu3.h"
+#include "dcimgui_impl_vulkan.h"
 #include "hexil.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gpu.h>
@@ -8,9 +8,10 @@
 SDL_AppResult SDL_AppIterate(struct HexilGlobalState *appstate) {
   // (After event loop)
   // Start the Dear ImGui frame
-  cImGui_ImplSDLGPU3_NewFrame();
+  cImGui_ImplVulkan_NewFrame();
   cImGui_ImplSDL3_NewFrame();
   ImGui_NewFrame();
+  ImGui_DockSpaceOverViewport();
   bool _true = true;
   ImGui_ShowDemoWindow(&_true); // Show demo window! :)
 
@@ -18,19 +19,20 @@ SDL_AppResult SDL_AppIterate(struct HexilGlobalState *appstate) {
   ImDrawData *draw_data = ImGui_GetDrawData();
   const bool is_minimized =
       (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
-
-  SDL_GPUCommandBuffer *command_buffer =
+  SDL_GPUCommandBuffer *render_buffer =
+      SDL_AcquireGPUCommandBuffer(appstate->gpu_device); // Acquire a GPU command buffer
+  SDL_GPUCommandBuffer *copy_buffer =
       SDL_AcquireGPUCommandBuffer(appstate->gpu_device); // Acquire a GPU command buffer
 
   SDL_GPUTexture *swapchain_texture;
-  SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer, appstate->main_window,
+  SDL_WaitAndAcquireGPUSwapchainTexture(render_buffer, appstate->main_window,
                                         &swapchain_texture, NULL,
                                         NULL); // Acquire a swapchain texture
 
   if (swapchain_texture != NULL && !is_minimized) {
     // This is mandatory: call ImGui_ImplSDLGPU3_PrepareDrawData() to upload the
     // vertex/index buffer!
-    cImGui_ImplSDLGPU3_PrepareDrawData(draw_data, command_buffer);
+    
 
     // Setup and start a render pass
     SDL_GPUColorTargetInfo target_info;
@@ -44,13 +46,13 @@ SDL_AppResult SDL_AppIterate(struct HexilGlobalState *appstate) {
     target_info.layer_or_depth_plane = 0;
     target_info.cycle = false;
     SDL_GPURenderPass *render_pass =
-        SDL_BeginGPURenderPass(command_buffer, &target_info, 1, NULL);
+        SDL_BeginGPURenderPass(render_buffer, &target_info, 1, NULL);
 
     // Render ImGui
-    cImGui_ImplSDLGPU3_RenderDrawData(draw_data, command_buffer, render_pass);
+    cImGui_ImplVulkan_RenderDrawData(draw_data, render_buffer);
 
     SDL_EndGPURenderPass(render_pass);
   }
-  SDL_SubmitGPUCommandBuffer(command_buffer);
+  SDL_SubmitGPUCommandBuffer(render_buffer);
   return SDL_APP_CONTINUE;
 }
