@@ -1,3 +1,7 @@
+Completion:
+# Prevents clangd from inserting vulkan headers where they don't belong!
+  HeaderInsertion: Never
+
 Documentation:
   CommentFormat: Doxygen
 

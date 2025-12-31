@@ -4,23 +4,25 @@ PROJECT(Hexil VERSION 0.1.0)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_EXTENSIONS ON)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
 
-find_package(Vulkan REQUIRED)
+find_package(volk CONFIG REQUIRED)
 
 add_custom_command(
   OUTPUT venv
   COMMAND python
+  CODEGEN
   ARGS -m venv ${CMAKE_BINARY_DIR}/venv
 )
 set_source_files_properties(venv SYMBOLIC True)
 
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/include/dcimgui.h ${CMAKE_BINARY_DIR}/dcimgui.cpp
+  CODEGEN
   BYPRODUCTS ${CMAKE_BINARY_DIR}/dcimgui.json
   DEPENDS venv
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/vendored/dear_bindings/
@@ -35,6 +37,7 @@ add_custom_command(
 )
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/include/dcimgui_impl_sdl3.h ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3.cpp
+  CODEGEN
   BYPRODUCTS ${CMAKE_BINARY_DIR}/dcimgui_impl_sdl3.json
   DEPENDS venv
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/vendored/dear_bindings/
@@ -49,6 +52,7 @@ add_custom_command(
 )
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/include/dcimgui_impl_vulkan.h ${CMAKE_BINARY_DIR}/dcimgui_impl_vulkan.cpp
+  CODEGEN
   BYPRODUCTS ${CMAKE_BINARY_DIR}/dcimgui_impl_vulkan.json
   DEPENDS venv
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/vendored/dear_bindings/
@@ -63,6 +67,7 @@ add_custom_command(
 )
 add_custom_command(
   OUTPUT ${CMAKE_BINARY_DIR}/include/imconfig.h
+  CODEGEN
   DEPENDS ${CMAKE_SOURCE_DIR}/vendored/imgui/imconfig.h
   COMMAND cmake
   ARGS -E make_directory ${CMAKE_BINARY_DIR}/include
@@ -85,6 +90,5 @@ target_sources(dcimgui PUBLIC ${CMAKE_BINARY_DIR}/include/imconfig.h)
 target_include_directories(dcimgui PUBLIC ${CMAKE_BINARY_DIR}/include)
 target_include_directories(dcimgui PRIVATE ${CMAKE_SOURCE_DIR}/vendored/imgui ${CMAKE_SOURCE_DIR}/vendored/imgui/backends)
 ADD_SUBDIRECTORY(./src ./obj)
-
 
 
