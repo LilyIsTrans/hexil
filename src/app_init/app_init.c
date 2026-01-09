@@ -2,6 +2,7 @@
 #include "dcimgui_impl_sdl3.h"
 #include "dcimgui_impl_vulkan.h"
 #include "hexil.h"
+#include "init_vulkan.h"
 #include "set_app_metadata.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_assert.h>
@@ -13,45 +14,10 @@
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
 #include <inttypes.h>
-#include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <vulkan/vk_platform.h>
-#include <vulkan/vulkan_core.h>
-
-void hexil_create_global_vulkan_instance(struct HexilGlobalState *appstate) {
-  uint32_t instance_extension_count;
-  const char *const *instance_extensions =
-      SDL_Vulkan_GetInstanceExtensions(&instance_extension_count);
-
-  if (SDL_GetLogPriority(SDL_LOG_CATEGORY_GPU) >= SDL_LOG_PRIORITY_INFO) {
-    SDL_LogInfo(SDL_LOG_CATEGORY_GPU,
-                "SDL Reported the following %" PRIu32
-                " Vulkan instance extensions are required:\n",
-                instance_extension_count);
-    for (uint32_t i = 0; i < instance_extension_count; ++i) {
-      SDL_LogInfo(SDL_LOG_CATEGORY_GPU, "\t%s\n", instance_extensions[i]);
-    }
-  }
-
-  VkInstanceCreateInfo instance_create_info = {
-      .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
-      .pNext = NULL, // TODO (Maybe): Implement support for non-vulkan
-                     // platforms by attaching a translation-layer driver in a
-                     // VkDirectDriverLoadingListLUNARG here
-      .flags = 0,
-      .pApplicationInfo = NULL,
-      .enabledLayerCount = 0,
-      .ppEnabledLayerNames = NULL,
-      .enabledExtensionCount = instance_extension_count,
-      .ppEnabledExtensionNames = instance_extensions};
-
-  SDL_assert_always(vkCreateInstance(&instance_create_info, NULL,
-                                     &appstate->vulkan_state.instance) ==
-                    VK_SUCCESS);
-}
+#include <volk.h>
 
 bool hexil_init_SDL() {
 #ifdef SDL_PLATFORM_LINUX
@@ -104,8 +70,8 @@ HexilOsWindow hexil_create_new_os_window(struct HexilGlobalState *appstate,
       SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_VULKAN;
   output.window = SDL_CreateWindow(window_title, width, height, window_flags);
 
-  SDL_assert_always(SDL_Vulkan_CreateSurface(
-      output.window, appstate->vulkan_state.instance, NULL, &output.surface));
+  hexil_create_surface(appstate, &output);
+  hexil_build_swapchain(appstate, &output);
 
   return output;
 }
@@ -134,6 +100,7 @@ SDL_AppResult SDL_AppInit(struct HexilGlobalState **appstate, int argc,
   if (!hexil_init_SDL()) {
     return SDL_APP_FAILURE;
   }
+
 
   hexil_init_global_state(appstate);
 

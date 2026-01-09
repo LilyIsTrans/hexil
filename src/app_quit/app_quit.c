@@ -3,15 +3,17 @@
 #include "dcimgui.h"
 #include "dcimgui_impl_sdl3.h"
 #include "dcimgui_impl_vulkan.h"
+#include <volk.h>
+
+
 void SDL_AppQuit(struct HexilGlobalState* appstate, SDL_AppResult result) {
-    SDL_WaitForGPUIdle(appstate->gpu_device);
+    vkDeviceWaitIdle(appstate->vulkan_state.device);
     cImGui_ImplSDL3_Shutdown();
     cImGui_ImplVulkan_Shutdown();
     ImGui_DestroyContext(NULL);
 
-    SDL_ReleaseWindowFromGPUDevice(appstate->gpu_device, appstate->main_window);
-    SDL_DestroyGPUDevice(appstate->gpu_device);
-    SDL_DestroyWindow(appstate->main_window);
+    
+    hexil_all_windows(appstate, &hexil_cleanup_window);
     SDL_Quit();
     return;
 }
