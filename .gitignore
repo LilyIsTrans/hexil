@@ -1,5 +1,1 @@
-# Any editor folders like .vscode and .clangd should be covered by this
-.*/
-
-# Don't track the build directory.
-build/
+/target
