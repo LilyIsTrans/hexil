@@ -1,10 +1,13 @@
 [workspace]
+members = ["hexil-macros"]
+
+[workspace.package]
+authors = ["Lily McCabe <hexil@lilymccabe.ca>"]
+edition = "2024"
 
 [package]
 name = "hexil"
 version = "0.1.0"
-authors = ["Lily McCabe <hexil@lilymccabe.ca>"]
-edition = "2024"
 
 [dependencies]
 anyhow = { version = "1.0.100", features = ["backtrace"] }
