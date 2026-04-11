@@ -1,21 +1,29 @@
 #![feature(error_generic_member_access)]
 #![feature(negative_impls)]
+#![feature(try_blocks)]
+#![feature(cast_maybe_uninit)]
 
 pub(crate) mod global_state;
 pub(crate) mod hexil_prelude;
 
 use hexil_prelude::all::*;
 use winit::event_loop::EventLoop;
+
 impl winit::application::ApplicationHandler<HexilEvent> for Option<GlobalState> {
     fn resumed(&mut self, eloop: &winit::event_loop::ActiveEventLoop) {
-        if self.is_none() {
-            if let Ok(new_state) = GlobalState::new(eloop) {
-                *self = Some(new_state);
-            }
-        }
-        if let Some(state) = self {
-            todo!("Allocate some command buffers and a window and a swapchain and shit!")
-        } else {
+        if let Err(uh_oh) = try {
+            // TODO: This feels UGLY. Find a better way.
+            let state = match self {
+                Some(s) => s,
+                None => {
+                    *self = Some(GlobalState::new(eloop)?);
+                    self.as_mut().unwrap()
+                }
+            };
+
+            state.vulkan_state.activate()?;
+        } {
+            eprintln!("{:?}", uh_oh);
             eloop.exit();
         }
     }
