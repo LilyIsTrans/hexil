@@ -1,7 +1,4 @@
-use std::{
-    backtrace::Backtrace, collections::VecDeque, mem::MaybeUninit, num::NonZeroU32,
-    sync::atomic::AtomicU64,
-};
+use std::{backtrace::Backtrace, mem::MaybeUninit, num::NonZeroU32, sync::atomic::AtomicU64};
 
 use anyhow::anyhow;
 use palette::stimulus::IntoStimulus;
@@ -68,6 +65,36 @@ pub struct HexilWindow {
 
 pub struct WindowState {
     pub main_window: HexilWindow,
+}
+
+fn format_color_depth(format: &vk::Format) -> Option<u32> {
+    match *format {
+        vk::Format::R16G16B16_UNORM => Some(16),
+        vk::Format::R16G16B16_SNORM => Some(16),
+        vk::Format::R16G16B16A16_UNORM => Some(16),
+        vk::Format::R16G16B16A16_SNORM => Some(16),
+
+        vk::Format::A2R10G10B10_UNORM_PACK32 => Some(10),
+        vk::Format::A2R10G10B10_SNORM_PACK32 => Some(10),
+
+        vk::Format::A2B10G10R10_UNORM_PACK32 => Some(10),
+        vk::Format::A2B10G10R10_SNORM_PACK32 => Some(10),
+
+        vk::Format::R8G8B8_UNORM => Some(8),
+        vk::Format::R8G8B8_SNORM => Some(8),
+        vk::Format::B8G8R8_UNORM => Some(8),
+        vk::Format::B8G8R8_SNORM => Some(8),
+
+        vk::Format::A8B8G8R8_UNORM_PACK32 => Some(8),
+        vk::Format::A8B8G8R8_SNORM_PACK32 => Some(8),
+
+        vk::Format::R8G8B8A8_UNORM => Some(8),
+        vk::Format::R8G8B8A8_SNORM => Some(8),
+        vk::Format::B8G8R8A8_UNORM => Some(8),
+        vk::Format::B8G8R8A8_SNORM => Some(8),
+
+        _ => None,
+    }
 }
 
 fn score_formats_for_underlying_swapchain_image(format: &vk::Format) -> u32 {
@@ -137,9 +164,89 @@ fn score_present_modes(mode: &vk::PresentModeKHR) -> u32 {
         _ => u32::MAX,
     }
 }
-fn compare_surface_formats(format: &vk::SurfaceFormat2KHR) -> std::cmp::Ordering {
-    match (format.surface_format.format, format.surface_format.color_space) {
-        (a, b)
+fn compare_surface_formats(
+    format: &vk::SurfaceFormat2KHR,
+    other: &vk::SurfaceFormat2KHR,
+) -> std::cmp::Ordering {
+    let color_depth_comparison = format_color_depth(&format.surface_format.format)
+        .unwrap_or(0)
+        .cmp(&format_color_depth(&other.surface_format.format).unwrap_or(0));
+    let overall_format_comparison =
+        score_formats_for_underlying_swapchain_image(&format.surface_format.format).cmp(
+            &score_formats_for_underlying_swapchain_image(&other.surface_format.format),
+        );
+    let color_space_comparison = score_color_spaces(&format.surface_format.color_space)
+        .cmp(&score_color_spaces(&other.surface_format.color_space));
+    compare_surface_formats_inner(
+        color_depth_comparison,
+        overall_format_comparison,
+        color_space_comparison,
+    )
+}
+
+fn compare_surface_formats_inner(
+    color_depth_comparison: std::cmp::Ordering,
+    overall_format_comparison: std::cmp::Ordering,
+    color_space_comparison: std::cmp::Ordering,
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering::*;
+    match (
+        color_depth_comparison,
+        overall_format_comparison,
+        color_space_comparison,
+    ) {
+        (Less, Less, Less) => Less,
+        (Less, Less, Equal) => Less,
+        (Less, Less, Greater) => Less,
+        (Less, Equal, Less) => Less,
+        (Less, Equal, Equal) => Less,
+        (Less, Equal, Greater) => Equal,
+        (Less, Greater, Less) => Less,
+        (Less, Greater, Equal) => Less,
+        (Less, Greater, Greater) => Greater,
+        (Equal, Less, Less) => Less,
+        (Equal, Less, Equal) => Less,
+        (Equal, Less, Greater) => Greater,
+        (Equal, Equal, Less) => Less,
+        (Equal, Equal, Equal) => Equal,
+        (Equal, Equal, Greater) => Greater,
+        (Equal, Greater, Less) => Less,
+        (Equal, Greater, Equal) => Greater,
+        (Equal, Greater, Greater) => Greater,
+        (Greater, Less, Less) => Less,
+        (Greater, Less, Equal) => Greater,
+        (Greater, Less, Greater) => Greater,
+        (Greater, Equal, Less) => Equal,
+        (Greater, Equal, Equal) => Greater,
+        (Greater, Equal, Greater) => Greater,
+        (Greater, Greater, Less) => Greater,
+        (Greater, Greater, Equal) => Greater,
+        (Greater, Greater, Greater) => Greater,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use proptest::prelude::*;
+    use std::cmp::Ordering::*;
+
+    use crate::global_state::compare_surface_formats_inner;
+
+    fn ordering_strat() -> impl Strategy<Value = std::cmp::Ordering> {
+        prop_oneof![
+            // For cases without data, `Just` is all you need
+            Just(std::cmp::Ordering::Less),
+            Just(std::cmp::Ordering::Equal),
+            Just(std::cmp::Ordering::Greater),
+        ]
+    }
+
+    proptest! {
+
+    #[test]
+    fn surface_format_comparison_sanity(a in ordering_strat(), b in ordering_strat(), c in ordering_strat()) {
+        prop_assert_eq!(compare_surface_formats_inner(a, b, c), compare_surface_formats_inner(a.reverse(), b.reverse(), c.reverse()).reverse())
+    }
     }
 }
 

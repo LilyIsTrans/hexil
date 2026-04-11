@@ -1,5 +1,6 @@
 [workspace]
-members = ["hexil-macros"]
+members = ["generate_additional_metadata_functions"]
+resolver = "3"
 
 [workspace.package]
 authors = ["Lily McCabe <hexil@lilymccabe.ca>"]
@@ -8,6 +9,7 @@ edition = "2024"
 [package]
 name = "hexil"
 version = "0.1.0"
+edition = "2024"
 
 [dependencies]
 anyhow = { version = "1.0.100", features = ["backtrace"] }
@@ -16,6 +18,7 @@ euclid = { version = "0.22.11", features = ["bytemuck", "mint", "serde"] }
 palette = { version = "0.7.6", features = ["serializing", "bytemuck"] }
 parking_lot = { version = "0.12.5", features = ["hardware-lock-elision", "serde"] }
 pkg-version = "1.0.0"
+proptest = "1.11.0"
 raw-window-handle = { version = "0.6.2", features = ["std"] }
 thiserror = "2.0.17"
 tracing = "0.1.44"
