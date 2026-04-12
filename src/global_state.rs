@@ -1,11 +1,15 @@
-use std::{backtrace::Backtrace, mem::MaybeUninit, num::NonZeroU32, sync::atomic::AtomicU64};
+use std::{
+    backtrace::Backtrace,
+    mem::MaybeUninit,
+    num::NonZeroU32,
+    sync::{Arc, atomic::AtomicU64},
+};
 
 use anyhow::anyhow;
-use palette::stimulus::IntoStimulus;
 use pkg_version::{pkg_version_major, pkg_version_minor, pkg_version_patch};
 use raw_window_handle::RawWindowHandle;
-use tracing::{debug, error, info, warn};
-use vulkanalia::vk::SwapchainCreateInfoKHRBuilder;
+use tracing::{debug, error, info, instrument, warn};
+use vulkanalia::vk::{SurfaceFormat2KHR, SurfaceFormatKHR, SwapchainCreateInfoKHRBuilder};
 
 use crate::hexil_prelude::all::*;
 
@@ -14,6 +18,10 @@ pub struct GlobalState {
     pub window_state: WindowState,
 }
 
+pub(crate) mod handle_events;
+
+#[derive(Debug)]
+#[repr(transparent)]
 pub struct PresentID {
     inner: AtomicU64,
 }
@@ -42,22 +50,90 @@ impl PresentID {
     }
 }
 
+#[derive(Debug)]
 pub struct Surface {
     pub surface: vk::SurfaceKHR,
     pub swapchain: Option<Swapchain>,
     pub swapchain_format: vk::Format,
-    pub supported_swapchain_view_formats: Vec<vk::Format>,
     pub selected_color_space: vk::ColorSpaceKHR,
     pub selected_alpha_composite_mode: vk::CompositeAlphaFlagsKHR,
     pub selected_present_mode: vk::PresentModeKHR,
     pub min_image_count: u32,
+    pub size: vk::Extent2D,
 }
 
+impl Surface {
+    const SHARING_MODE: vk::SharingMode = vk::SharingMode::EXCLUSIVE;
+    /// Call this whenever the size of the window has changed (including from, but not to, nonexistence).
+    pub fn rebuild_swapchain(
+        &mut self,
+        vulkan_state: &VulkanState,
+        new_size: (NonZeroU32, NonZeroU32),
+    ) -> Result<&mut Swapchain> {
+        let info = vk::SwapchainCreateInfoKHR::builder()
+            .flags(
+                vk::SwapchainCreateFlagsKHR::DEFERRED_MEMORY_ALLOCATION
+                    | vk::SwapchainCreateFlagsKHR::PRESENT_WAIT_2
+                    | vk::SwapchainCreateFlagsKHR::PRESENT_ID_2,
+            )
+            .surface(self.surface)
+            .min_image_count(self.min_image_count)
+            .image_format(self.swapchain_format)
+            .image_color_space(self.selected_color_space)
+            .image_extent(
+                vk::Extent2D::builder()
+                    .width(new_size.0.get())
+                    .height(new_size.1.get())
+                    .build(),
+            )
+            .image_array_layers(1)
+            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+            .image_sharing_mode(Self::SHARING_MODE)
+            .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
+            .image_color_space(self.selected_color_space)
+            .composite_alpha(self.selected_alpha_composite_mode)
+            .present_mode(self.selected_present_mode)
+            .clipped(true)
+            .old_swapchain(
+                self.swapchain
+                    .as_ref()
+                    .map_or(vk::SwapchainKHR::null(), |s| s.swapchain),
+            );
+
+        // Safety: All fields in `info` are set to valid values
+        let swapchain = unsafe { vulkan_state.device.create_swapchain_khr(&info, None) }?;
+
+        let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::empty());
+
+        let fence = unsafe { vulkan_state.device.create_fence(&fence_info, None) }?;
+
+        let images = unsafe { vulkan_state.device.get_swapchain_images_khr(swapchain) }?.into();
+
+        let swapchain = Swapchain {
+            swapchain,
+            images,
+            acquire_fence: fence,
+            last_present_id: PresentID::ZERO,
+        };
+
+        self.swapchain = Some(swapchain);
+
+        Ok(self
+            .swapchain
+            .as_mut()
+            .expect("We literally just created the swapchain."))
+    }
+}
+
+#[derive(Debug)]
 pub struct Swapchain {
     pub swapchain: vk::SwapchainKHR,
+    pub images: Box<[vk::Image]>,
+    pub acquire_fence: vk::Fence,
     pub last_present_id: PresentID,
 }
 
+#[derive(Debug)]
 pub struct HexilWindow {
     pub window: winit::window::Window,
     pub surface: Option<Surface>,
@@ -164,6 +240,7 @@ fn score_present_modes(mode: &vk::PresentModeKHR) -> u32 {
         _ => u32::MAX,
     }
 }
+#[instrument(level = "info")]
 fn compare_surface_formats(
     format: &vk::SurfaceFormat2KHR,
     other: &vk::SurfaceFormat2KHR,
@@ -250,69 +327,24 @@ mod test {
     }
 }
 
-impl HexilWindow {
-    const SHARING_MODE: vk::SharingMode = vk::SharingMode::EXCLUSIVE;
-
-    /// Call this whenever the size of the window has changed (including from, but not to, nonexistence).
-    pub fn rebuild_swapchain(
-        &mut self,
-        vulkan_state: &VulkanState,
-        new_size: (NonZeroU32, NonZeroU32),
-    ) -> Result<()> {
-        let surface: &mut Surface = match &mut self.surface {
-            Some(s) => s,
-            None => {
-                self.create_surface(vulkan_state)?;
-                self.surface
-                    .as_mut()
-                    .expect("We literally just created the surface.")
-            }
-        };
-        let info = vk::SwapchainCreateInfoKHR::builder()
-            .flags(
-                vk::SwapchainCreateFlagsKHR::DEFERRED_MEMORY_ALLOCATION
-                    | vk::SwapchainCreateFlagsKHR::PRESENT_WAIT_2
-                    | vk::SwapchainCreateFlagsKHR::PRESENT_ID_2,
-            )
-            .surface(surface.surface)
-            .min_image_count(surface.min_image_count)
-            .image_format(surface.swapchain_format)
-            .image_color_space(surface.selected_color_space)
-            .image_extent(
-                vk::Extent2D::builder()
-                    .width(new_size.0.get())
-                    .height(new_size.1.get())
-                    .build(),
-            )
-            .image_array_layers(1)
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
-            .image_sharing_mode(Self::SHARING_MODE)
-            .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
-            .image_color_space(surface.selected_color_space)
-            .composite_alpha(surface.selected_alpha_composite_mode)
-            .present_mode(surface.selected_present_mode)
-            .clipped(true)
-            .old_swapchain(
-                surface
-                    .swapchain
-                    .as_ref()
-                    .map_or(vk::SwapchainKHR::null(), |s| s.swapchain),
-            );
-
-        // Safety: All fields in `info` are set to valid values
-        let swapchain = unsafe { vulkan_state.device.create_swapchain_khr(&info, None) }?;
-
-        let swapchain = Swapchain {
-            swapchain,
-            last_present_id: PresentID::ZERO,
-        };
-
-        surface.swapchain = Some(swapchain);
-
-        Ok(())
+#[instrument(level = "info")]
+fn select_composite_alpha_mode(modes: vk::CompositeAlphaFlagsKHR) -> vk::CompositeAlphaFlagsKHR {
+    if modes.contains(vk::CompositeAlphaFlagsKHR::OPAQUE) {
+        vk::CompositeAlphaFlagsKHR::OPAQUE
+    } else if modes.contains(vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED) {
+        vk::CompositeAlphaFlagsKHR::PRE_MULTIPLIED
+    } else if modes.contains(vk::CompositeAlphaFlagsKHR::POST_MULTIPLIED) {
+        vk::CompositeAlphaFlagsKHR::POST_MULTIPLIED
+    } else if modes.contains(vk::CompositeAlphaFlagsKHR::INHERIT) {
+        vk::CompositeAlphaFlagsKHR::INHERIT
+    } else {
+        panic!("No known composite alpha mode supported!")
     }
+}
 
-    pub fn create_surface(&mut self, vulkan_state: &VulkanState) -> Result<()> {
+impl HexilWindow {
+    #[instrument(level = "info")]
+    pub fn create_surface(&mut self, vulkan_state: &VulkanState) -> Result<&mut Surface> {
         use vulkanalia::window::create_surface;
 
         let surface =
@@ -396,22 +428,61 @@ impl HexilWindow {
                 )
         }?;
 
+        let SurfaceFormat2KHR {
+            s_type: _,
+            next: _,
+            surface_format:
+                SurfaceFormatKHR {
+                    format: swapchain_format,
+                    color_space: selected_color_space,
+                },
+        } = surface_formats
+            .iter()
+            .copied()
+            .max_by(compare_surface_formats)
+            .expect("No surface formats supported!");
+
+        let selected_alpha_composite_mode = select_composite_alpha_mode(
+            surface_capabilities
+                .surface_capabilities
+                .supported_composite_alpha,
+        );
+
+        let min_image_count = surface_capabilities.surface_capabilities.min_image_count;
+
         let surface = Surface {
             surface,
             swapchain: None,
-            swapchain_format: todo!(),
-            supported_swapchain_view_formats: todo!(),
-            selected_color_space: todo!(),
-            selected_alpha_composite_mode: todo!(),
+            swapchain_format,
+            selected_color_space,
+            selected_alpha_composite_mode,
             selected_present_mode,
-            min_image_count: todo!(),
+            min_image_count,
+            size: surface_capabilities.surface_capabilities.current_extent,
         };
 
-        Ok(())
+        self.surface = Some(surface);
+
+        Ok(self
+            .surface
+            .as_mut()
+            .expect("We literally just created the surface."))
     }
 
-    fn choose_underlying_format(supported_formats: &[vk::Format]) -> vk::Format {
-        todo!()
+    fn rebuild_swapchain(
+        &mut self,
+        vulkan_state: &VulkanState,
+        new_size: (NonZeroU32, NonZeroU32),
+    ) -> Result<&mut Swapchain> {
+        self.get_or_create_surface(vulkan_state)?
+            .rebuild_swapchain(vulkan_state, new_size)
+    }
+
+    fn get_or_create_surface(&mut self, vulkan_state: &VulkanState) -> Result<&mut Surface> {
+        match self.surface {
+            Some(_) => Ok(self.surface.as_mut().unwrap()),
+            None => self.create_surface(vulkan_state),
+        }
     }
 }
 
@@ -433,6 +504,7 @@ impl WindowState {
 unsafe impl Send for ActiveVulkanState {}
 impl !Sync for ActiveVulkanState {}
 
+#[derive(Debug, Clone, Copy)]
 pub struct ActiveVulkanState {
     pub graphics_command_pool: vk::CommandPool,
     pub transfer_command_pool: vk::CommandPool,
@@ -441,13 +513,14 @@ pub struct ActiveVulkanState {
     pub primary_transfer_command_buffer: vk::CommandBuffer,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct QueueWithInfo {
     pub queue: vk::Queue,
     pub queue_family_index: u32,
     pub queue_index: u32,
 }
 
+#[derive(Debug)]
 pub struct VulkanState {
     pub required_extensions: Vec<vk::Extension>,
     pub entry: vulkanalia::Entry,
@@ -561,7 +634,14 @@ impl VulkanState {
         self.active_state.as_mut()
     }
 
-    pub fn activate(&mut self) -> Result<()> {
+    pub fn get_or_activate(&mut self) -> Result<&mut ActiveVulkanState> {
+        match self.active_state {
+            Some(_) => Ok(self.active_state.as_mut().unwrap()),
+            None => self.activate(),
+        }
+    }
+
+    pub fn activate(&mut self) -> Result<&mut ActiveVulkanState> {
         let gfx_cmd_pool_create_info = vk::CommandPoolCreateInfo::builder()
             .queue_family_index(self.graphics_queue.queue_family_index);
         let xfer_cmd_pool_create_info = vk::CommandPoolCreateInfo::builder()
@@ -610,8 +690,7 @@ impl VulkanState {
             primary_graphics_command_buffer,
             primary_transfer_command_buffer,
         });
-
-        todo!()
+        Ok(self.active_state.as_mut().unwrap())
     }
 
     fn extension_for_window(window: &RawWindowHandle) -> Result<vk::Extension, HexilError> {

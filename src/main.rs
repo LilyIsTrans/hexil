@@ -7,6 +7,7 @@ pub(crate) mod global_state;
 pub(crate) mod hexil_prelude;
 
 use hexil_prelude::all::*;
+use tracing::{error, info, warn};
 use winit::event_loop::EventLoop;
 
 impl winit::application::ApplicationHandler<HexilEvent> for Option<GlobalState> {
@@ -34,7 +35,42 @@ impl winit::application::ApplicationHandler<HexilEvent> for Option<GlobalState> 
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
-        todo!()
+        if !matches!(event, WindowEvent::CloseRequested | WindowEvent::Destroyed)
+            && !event_loop.exiting()
+        {
+            if self.is_none() {
+                self.resumed(event_loop);
+            }
+        }
+        let state = self.as_mut();
+        use winit::event::WindowEvent;
+        if let Err(uh_oh) = try {
+            match &event {
+                WindowEvent::Resized(physical_size) => state
+                    .expect("Expected global state to be initialized!")
+                    .handle_resized(*physical_size, window_id)?,
+                WindowEvent::CloseRequested | WindowEvent::Destroyed => match state {
+                    None => (),
+                    Some(state) => {
+                        state.handle_close_requested(event_loop);
+                    }
+                },
+                WindowEvent::ScaleFactorChanged {
+                    scale_factor,
+                    inner_size_writer,
+                } => warn!("We don't support scaling yet!"),
+                WindowEvent::RedrawRequested => match state {
+                    None => error!("Something invalidated my state! Wtf???"),
+                    Some(state) => state.perform_redraw()?,
+                },
+
+                other => {
+                    info!("Ignored event: {:?}", other)
+                }
+            }
+        } {
+            error!(window_id = Into::<u64>::into(window_id), "{:?}", event);
+        }
     }
 }
 

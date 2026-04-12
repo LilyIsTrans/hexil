@@ -1,5 +1,5 @@
 [workspace]
-members = ["generate_additional_metadata_functions"]
+members = []
 resolver = "3"
 
 [workspace.package]
@@ -13,6 +13,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = { version = "1.0.100", features = ["backtrace"] }
+bitflags = "2.11.0"
 bytemuck = { version = "1.24.0", features = ["derive", "zeroable_maybe_uninit", "pod_saturating", "min_const_generics", "must_cast", "const_zeroed", "zeroable_atomics"] }
 euclid = { version = "0.22.11", features = ["bytemuck", "mint", "serde"] }
 palette = { version = "0.7.6", features = ["serializing", "bytemuck"] }
