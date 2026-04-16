@@ -1,12 +1,37 @@
 use crate::hexil_prelude::all::*;
+use anyhow::Context;
 use anyhow::anyhow;
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{error, info, warn};
 use winit::dpi::PhysicalSize;
-use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowId;
 
 impl super::GlobalState {
+    pub fn handle_event_generic(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        window_id: winit::window::WindowId,
+        event: winit::event::WindowEvent,
+    ) {
+        use winit::event::WindowEvent;
+        if let Err(_) = try {
+            match &event {
+                WindowEvent::Resized(physical_size) => {
+                    self.handle_resized(*physical_size, window_id)?
+                }
+
+                WindowEvent::RedrawRequested => self.perform_redraw()?,
+
+                WindowEvent::CloseRequested | WindowEvent::Destroyed => unreachable!(),
+
+                other => {
+                    info!("Ignored event: {:?}", other)
+                }
+            }
+        } {
+            error!(window_id = Into::<u64>::into(window_id), "{:?}", event);
+        }
+    }
     pub fn handle_resized(
         &mut self,
         PhysicalSize { width, height }: PhysicalSize<u32>,
@@ -22,21 +47,15 @@ impl super::GlobalState {
         match self.window_state.main_window.surface.as_mut() {
             None => (),
             Some(surface) => {
-                match surface.swapchain.as_mut() {
-                    None => (),
-                    Some(swapchain) => {
-                        unsafe {
-                            self.vulkan_state
-                                .device
-                                .destroy_swapchain_khr(swapchain.swapchain, None)
-                        };
-                        swapchain.swapchain = vk::Handle::null();
-                    }
-                };
-                surface.swapchain = None;
                 unsafe {
                     self.vulkan_state
-                        .instance
+                        .device()
+                        .destroy_swapchain_khr(surface.swapchain.swapchain, None)
+                };
+                surface.swapchain.swapchain = vk::Handle::null();
+                unsafe {
+                    self.vulkan_state
+                        .instance()
                         .destroy_surface_khr(surface.surface, None)
                 };
                 surface.surface = vk::Handle::null();
@@ -55,31 +74,21 @@ impl super::GlobalState {
             .window_state
             .main_window
             .get_or_create_surface(&self.vulkan_state)?;
-        let mut swapchain = match surface.swapchain.as_mut() {
-            Some(swapchain) => swapchain,
-            None => surface.rebuild_swapchain(
-                &self.vulkan_state,
-                (
-                    surface.size.width.try_into()?,
-                    surface.size.height.try_into()?,
-                ),
-            )?,
-        };
 
         (unsafe {
             self.vulkan_state
-                .device
-                .reset_fences(&[swapchain.acquire_fence])
+                .device()
+                .reset_fences(&[surface.swapchain.acquire_fence])
         })?;
 
         // Safety: semaphore and fence must not both be null, and each of them must either be null or unsignalled and not in use by any other operation
         let image_idx = loop {
             match unsafe {
-                self.vulkan_state.device.acquire_next_image_khr(
-                    swapchain.swapchain,
+                self.vulkan_state.device().acquire_next_image_khr(
+                    surface.swapchain.swapchain,
                     u64::MAX,
                     vk::Semaphore::null(),
-                    swapchain.acquire_fence,
+                    surface.swapchain.acquire_fence,
                 )
             } {
                 Ok((idx, vk::SuccessCode::SUCCESS)) => break idx,
@@ -89,16 +98,13 @@ impl super::GlobalState {
                     continue;
                 }
                 Ok((_, vk::SuccessCode::SUBOPTIMAL_KHR)) | Err(vk::ErrorCode::OUT_OF_DATE_KHR) => {
-                    swapchain = match surface.swapchain.as_mut() {
-                        Some(swapchain) => swapchain,
-                        None => surface.rebuild_swapchain(
-                            &self.vulkan_state,
-                            (
-                                surface.size.width.try_into()?,
-                                surface.size.height.try_into()?,
-                            ),
-                        )?,
-                    };
+                    surface.rebuild_swapchain(
+                        &self.vulkan_state,
+                        (
+                            surface.size.width.try_into()?,
+                            surface.size.height.try_into()?,
+                        ),
+                    )?;
                     warn!(
                         "Getting out of date swapchain images! Seeing this a few times, especially when resizing or moving windows, is normal, but if you see LOTS of these and are having serious performance problems or unpredictable crashes, this is probably why."
                     );
@@ -148,6 +154,7 @@ impl super::GlobalState {
                     return Err(anyhow!(e));
                 }
                 Err(e) => {
+                    let e: vk::ErrorCode = e;
                     error!(
                         "An unexpected type of Vulkan error has occurred while acquiring swapchain images! ({:?}). Something has gone terribly wrong! Attempting graceful shutdown.",
                         e
@@ -157,7 +164,7 @@ impl super::GlobalState {
             }
         };
 
-        let image = swapchain.images[TryInto::<usize>::try_into(image_idx)?];
+        let image = surface.swapchain.images[TryInto::<usize>::try_into(image_idx)?];
 
         let image_view_create_info = vk::ImageViewCreateInfo::builder()
             .format(surface.swapchain_format.clone())
@@ -168,7 +175,7 @@ impl super::GlobalState {
 
         let image_view = unsafe {
             self.vulkan_state
-                .device
+                .device()
                 .create_image_view(&image_view_create_info, None)
         }?;
 
@@ -191,28 +198,92 @@ impl super::GlobalState {
                 extent: surface.size,
             });
 
-        let active_vulkan_state = *self.vulkan_state.get_or_activate()?;
+        let active_vulkan_state = self.vulkan_state.active_state();
 
-        let tmp = [swapchain.acquire_fence];
+        let begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+
+        let render_semaphore = unsafe {
+            self.vulkan_state
+                .device()
+                .create_semaphore(&vk::SemaphoreCreateInfo::builder(), None)
+        }?;
+
+        let render_semaphore_submit_info =
+            vk::SemaphoreSubmitInfo::builder().semaphore(render_semaphore);
+
+        let (command_buffer, fence) =
+            active_vulkan_state.get_graphics_command_buffer(self.vulkan_state.device())?;
+        let binding = [vk::CommandBufferSubmitInfo::builder().command_buffer(command_buffer)];
+        let submit_info = vk::SubmitInfo2::builder()
+            .command_buffer_infos(&binding)
+            .signal_semaphore_infos(std::slice::from_ref(&render_semaphore_submit_info));
+        let queue = self.vulkan_state.graphics_queue().write();
+
+        let present_info = vk::PresentInfoKHR::builder()
+            .image_indices(std::slice::from_ref(&image_idx))
+            .swapchains(std::slice::from_ref(&surface.swapchain.swapchain))
+            .wait_semaphores(std::slice::from_ref(&render_semaphore));
 
         unsafe {
-            self.vulkan_state.device.wait_for_fences(
-                &tmp,
-                true,
-                std::time::Duration::from_millis(5)
-                    .as_nanos()
-                    .try_into()
-                    .unwrap(),
-            )
+            self.vulkan_state
+                .device()
+                .begin_command_buffer(command_buffer, &begin_info)?;
+            self.vulkan_state
+                .device()
+                .cmd_begin_rendering(command_buffer, &render_info);
+            self.vulkan_state.device().cmd_end_rendering(command_buffer);
+            self.vulkan_state
+                .device()
+                .end_command_buffer(command_buffer)?;
         };
+
+        let mut total_ms = 0;
+        loop {
+            match unsafe {
+                self.vulkan_state.device().wait_for_fences(
+                    &[surface.swapchain.acquire_fence],
+                    true,
+                    std::time::Duration::from_millis(5)
+                        .as_nanos()
+                        .try_into()
+                        .unwrap(),
+                )
+            } {
+                Ok(vk::SuccessCode::SUCCESS) => break,
+                Ok(vk::SuccessCode::TIMEOUT) => {
+                    total_ms += 5;
+                    warn!("Waiting for swapchain fence has taken over {}ms", total_ms);
+                    continue;
+                }
+                Ok(s) => {
+                    error!(
+                        "Unexpected type of success code ({:?}) for swapchain fence wait! Something has gone terribly wrong!",
+                        s
+                    );
+                    return Err(anyhow!(
+                        "Swapchain fence wait unexpected success code ({:?})",
+                        s
+                    ));
+                }
+                Err(e) => {
+                    error!(
+                        "An unexpected error occurred waiting for swapchain fences! {:?}",
+                        e
+                    );
+                    return Err(e).context("Swapchain fence wait failure");
+                }
+            }
+        }
 
         unsafe {
-            self.vulkan_state.device.cmd_begin_rendering(
-                active_vulkan_state.primary_graphics_command_buffer,
-                &render_info,
-            )
-        };
-
-        todo!()
+            self.vulkan_state
+                .device()
+                .queue_submit2(queue.queue, &[submit_info], fence)?;
+            self.vulkan_state
+                .device()
+                .queue_present_khr(queue.queue, &present_info)?;
+        }
+        Ok(())
     }
 }

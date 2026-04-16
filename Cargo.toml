@@ -16,6 +16,7 @@ anyhow = { version = "1.0.100", features = ["backtrace"] }
 bitflags = "2.11.0"
 bytemuck = { version = "1.24.0", features = ["derive", "zeroable_maybe_uninit", "pod_saturating", "min_const_generics", "must_cast", "const_zeroed", "zeroable_atomics"] }
 euclid = { version = "0.22.11", features = ["bytemuck", "mint", "serde"] }
+itertools = "0.14.0"
 palette = { version = "0.7.6", features = ["serializing", "bytemuck"] }
 parking_lot = { version = "0.12.5", features = ["hardware-lock-elision", "serde"] }
 pkg-version = "1.0.0"

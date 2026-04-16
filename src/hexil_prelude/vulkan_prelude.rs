@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 pub use vulkanalia::prelude::v1_4::*;
 pub use vulkanalia::vk::KhrGetSurfaceCapabilities2ExtensionInstanceCommands;
 pub use vulkanalia::vk::KhrPresentWait2ExtensionDeviceCommands;

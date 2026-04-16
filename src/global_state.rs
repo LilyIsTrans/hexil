@@ -1,17 +1,9 @@
-use std::{
-    backtrace::Backtrace,
-    mem::MaybeUninit,
-    num::NonZeroU32,
-    sync::{Arc, atomic::AtomicU64},
-};
-
 use anyhow::anyhow;
-use pkg_version::{pkg_version_major, pkg_version_minor, pkg_version_patch};
-use raw_window_handle::RawWindowHandle;
-use tracing::{debug, error, info, instrument, warn};
-use vulkanalia::vk::{SurfaceFormat2KHR, SurfaceFormatKHR, SwapchainCreateInfoKHRBuilder};
+use std::{num::NonZeroU32, sync::atomic::AtomicU64};
+use tracing::{debug, error, instrument};
+use vulkanalia::vk::{SurfaceFormat2KHR, SurfaceFormatKHR};
 
-use crate::hexil_prelude::all::*;
+use crate::{global_state::vulkan_state::VulkanState, hexil_prelude::all::*};
 
 pub struct GlobalState {
     pub vulkan_state: VulkanState,
@@ -53,7 +45,7 @@ impl PresentID {
 #[derive(Debug)]
 pub struct Surface {
     pub surface: vk::SurfaceKHR,
-    pub swapchain: Option<Swapchain>,
+    pub swapchain: Swapchain,
     pub swapchain_format: vk::Format,
     pub selected_color_space: vk::ColorSpaceKHR,
     pub selected_alpha_composite_mode: vk::CompositeAlphaFlagsKHR,
@@ -63,23 +55,50 @@ pub struct Surface {
 }
 
 impl Surface {
-    const SHARING_MODE: vk::SharingMode = vk::SharingMode::EXCLUSIVE;
-    /// Call this whenever the size of the window has changed (including from, but not to, nonexistence).
     pub fn rebuild_swapchain(
         &mut self,
-        vulkan_state: &VulkanState,
+        vulkan_state: &vulkan_state::VulkanState,
         new_size: (NonZeroU32, NonZeroU32),
-    ) -> Result<&mut Swapchain> {
+    ) -> Result<()> {
+        self.swapchain = Swapchain::build_swapchain(
+            self.surface,
+            self.min_image_count,
+            self.swapchain_format,
+            self.selected_color_space,
+            self.selected_alpha_composite_mode,
+            self.selected_present_mode,
+            Some(&self.swapchain),
+            vulkan_state,
+            new_size,
+        )?;
+        Ok(())
+    }
+}
+
+impl Swapchain {
+    const SHARING_MODE: vk::SharingMode = vk::SharingMode::EXCLUSIVE;
+    /// Call this whenever the size of the window has changed (including from, but not to, nonexistence).
+    pub fn build_swapchain(
+        surface: vk::SurfaceKHR,
+        min_image_count: u32,
+        swapchain_format: vk::Format,
+        selected_color_space: vk::ColorSpaceKHR,
+        selected_alpha_composite_mode: vk::CompositeAlphaFlagsKHR,
+        selected_present_mode: vk::PresentModeKHR,
+        old_swapchain: Option<&Swapchain>,
+        vulkan_state: &vulkan_state::VulkanState,
+        new_size: (NonZeroU32, NonZeroU32),
+    ) -> Result<Swapchain> {
         let info = vk::SwapchainCreateInfoKHR::builder()
             .flags(
                 vk::SwapchainCreateFlagsKHR::DEFERRED_MEMORY_ALLOCATION
                     | vk::SwapchainCreateFlagsKHR::PRESENT_WAIT_2
                     | vk::SwapchainCreateFlagsKHR::PRESENT_ID_2,
             )
-            .surface(self.surface)
-            .min_image_count(self.min_image_count)
-            .image_format(self.swapchain_format)
-            .image_color_space(self.selected_color_space)
+            .surface(surface)
+            .min_image_count(min_image_count)
+            .image_format(swapchain_format)
+            .image_color_space(selected_color_space)
             .image_extent(
                 vk::Extent2D::builder()
                     .width(new_size.0.get())
@@ -90,38 +109,31 @@ impl Surface {
             .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
             .image_sharing_mode(Self::SHARING_MODE)
             .pre_transform(vk::SurfaceTransformFlagsKHR::IDENTITY)
-            .image_color_space(self.selected_color_space)
-            .composite_alpha(self.selected_alpha_composite_mode)
-            .present_mode(self.selected_present_mode)
+            .image_color_space(selected_color_space)
+            .composite_alpha(selected_alpha_composite_mode)
+            .present_mode(selected_present_mode)
             .clipped(true)
             .old_swapchain(
-                self.swapchain
+                old_swapchain
                     .as_ref()
                     .map_or(vk::SwapchainKHR::null(), |s| s.swapchain),
             );
 
         // Safety: All fields in `info` are set to valid values
-        let swapchain = unsafe { vulkan_state.device.create_swapchain_khr(&info, None) }?;
+        let swapchain = unsafe { vulkan_state.device().create_swapchain_khr(&info, None) }?;
 
         let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::empty());
 
-        let fence = unsafe { vulkan_state.device.create_fence(&fence_info, None) }?;
+        let fence = unsafe { vulkan_state.device().create_fence(&fence_info, None) }?;
 
-        let images = unsafe { vulkan_state.device.get_swapchain_images_khr(swapchain) }?.into();
+        let images = unsafe { vulkan_state.device().get_swapchain_images_khr(swapchain) }?.into();
 
-        let swapchain = Swapchain {
+        Ok(Swapchain {
             swapchain,
             images,
             acquire_fence: fence,
             last_present_id: PresentID::ZERO,
-        };
-
-        self.swapchain = Some(swapchain);
-
-        Ok(self
-            .swapchain
-            .as_mut()
-            .expect("We literally just created the swapchain."))
+        })
     }
 }
 
@@ -305,7 +317,6 @@ fn compare_surface_formats_inner(
 #[cfg(test)]
 mod test {
     use proptest::prelude::*;
-    use std::cmp::Ordering::*;
 
     use crate::global_state::compare_surface_formats_inner;
 
@@ -348,7 +359,7 @@ impl HexilWindow {
         use vulkanalia::window::create_surface;
 
         let surface =
-            (unsafe { create_surface(&vulkan_state.instance, &self.window, &self.window) })?;
+            (unsafe { create_surface(&vulkan_state.instance(), &self.window, &self.window) })?;
 
         let mut surface_present_scaling_caps = vk::SurfacePresentScalingCapabilitiesKHR::builder();
 
@@ -367,9 +378,9 @@ impl HexilWindow {
 
         unsafe {
             vulkan_state
-                .instance
+                .instance()
                 .get_physical_device_surface_capabilities2_khr(
-                    vulkan_state.device.physical_device(),
+                    vulkan_state.device().physical_device(),
                     &surface_info,
                     &mut surface_capabilities,
                 )
@@ -389,9 +400,9 @@ impl HexilWindow {
 
         unsafe {
             vulkan_state
-                .instance
+                .instance()
                 .get_physical_device_surface_capabilities2_khr(
-                    vulkan_state.device.physical_device(),
+                    vulkan_state.device().physical_device(),
                     &surface_info,
                     &mut surface_capabilities,
                 )
@@ -421,9 +432,9 @@ impl HexilWindow {
 
         let surface_formats = unsafe {
             vulkan_state
-                .instance
+                .instance()
                 .get_physical_device_surface_formats2_khr(
-                    vulkan_state.device.physical_device(),
+                    vulkan_state.device().physical_device(),
                     &surface_info,
                 )
         }?;
@@ -450,15 +461,26 @@ impl HexilWindow {
 
         let min_image_count = surface_capabilities.surface_capabilities.min_image_count;
 
+        let size = surface_capabilities.surface_capabilities.current_extent;
         let surface = Surface {
             surface,
-            swapchain: None,
+            swapchain: Swapchain::build_swapchain(
+                surface,
+                min_image_count,
+                swapchain_format,
+                selected_color_space,
+                selected_alpha_composite_mode,
+                selected_present_mode,
+                None,
+                vulkan_state,
+                (size.width.try_into()?, size.height.try_into()?),
+            )?,
             swapchain_format,
             selected_color_space,
             selected_alpha_composite_mode,
             selected_present_mode,
             min_image_count,
-            size: surface_capabilities.surface_capabilities.current_extent,
+            size,
         };
 
         self.surface = Some(surface);
@@ -472,10 +494,9 @@ impl HexilWindow {
     fn rebuild_swapchain(
         &mut self,
         vulkan_state: &VulkanState,
-        new_size: (NonZeroU32, NonZeroU32),
+        _new_size: (NonZeroU32, NonZeroU32),
     ) -> Result<&mut Swapchain> {
-        self.get_or_create_surface(vulkan_state)?
-            .rebuild_swapchain(vulkan_state, new_size)
+        Ok(&mut self.get_or_create_surface(vulkan_state)?.swapchain)
     }
 
     fn get_or_create_surface(&mut self, vulkan_state: &VulkanState) -> Result<&mut Surface> {
@@ -501,18 +522,6 @@ impl WindowState {
     }
 }
 
-unsafe impl Send for ActiveVulkanState {}
-impl !Sync for ActiveVulkanState {}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ActiveVulkanState {
-    pub graphics_command_pool: vk::CommandPool,
-    pub transfer_command_pool: vk::CommandPool,
-
-    pub primary_graphics_command_buffer: vk::CommandBuffer,
-    pub primary_transfer_command_buffer: vk::CommandBuffer,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct QueueWithInfo {
     pub queue: vk::Queue,
@@ -520,17 +529,7 @@ pub struct QueueWithInfo {
     pub queue_index: u32,
 }
 
-#[derive(Debug)]
-pub struct VulkanState {
-    pub required_extensions: Vec<vk::Extension>,
-    pub entry: vulkanalia::Entry,
-    pub instance: vulkanalia::Instance,
-    pub device: vulkanalia::Device,
-    pub graphics_queue: QueueWithInfo,
-    pub transfer_queue: QueueWithInfo,
-    active_state: Option<ActiveVulkanState>,
-    pub present_id: AtomicU64,
-}
+pub mod vulkan_state;
 
 impl GlobalState {
     /// Initializes Hexil's global state
@@ -542,409 +541,13 @@ impl GlobalState {
         use raw_window_handle::HasWindowHandle;
         let window_state = WindowState::new(eloop)?;
 
-        let vulkan_state =
-            VulkanState::new(&window_state.main_window.window.window_handle()?.as_raw())?;
+        let vulkan_state = vulkan_state::VulkanState::new(
+            &window_state.main_window.window.window_handle()?.as_raw(),
+        )?;
 
         Ok(Self {
             vulkan_state,
             window_state,
         })
-    }
-}
-
-impl Drop for VulkanState {
-    fn drop(&mut self) {
-        if let Some(active_state) = &mut self.active_state {
-            unsafe {
-                self.device
-                    .destroy_command_pool(active_state.graphics_command_pool, None)
-            };
-            active_state.graphics_command_pool = vk::Handle::null();
-            unsafe {
-                self.device
-                    .destroy_command_pool(active_state.transfer_command_pool, None)
-            };
-            active_state.transfer_command_pool = vk::Handle::null();
-        }
-        self.active_state = None;
-
-        unsafe { self.device.destroy_device(None) };
-        self.graphics_queue.queue = vk::Handle::null();
-        self.transfer_queue.queue = vk::Handle::null();
-
-        unsafe { self.instance.destroy_instance(None) };
-    }
-}
-
-impl VulkanState {
-    pub fn new(main_window: &RawWindowHandle) -> Result<Self> {
-        let loader =
-            unsafe { vulkanalia::loader::LibloadingLoader::new(vulkanalia::loader::LIBRARY) }?;
-        let entry = unsafe { vulkanalia::Entry::new(loader) }.map_err(|b| anyhow!("{}", b))?;
-        let app_info = vk::ApplicationInfo::builder()
-            .application_version(vk::make_version(
-                pkg_version_major!(),
-                pkg_version_minor!(),
-                pkg_version_patch!(),
-            ))
-            .api_version(vk::make_version(1, 4, 0))
-            .application_name(b"Hexil");
-
-        let required_extensions: Vec<vk::Extension> = REQUIRED_EXTENSIONS
-            .iter()
-            .chain([Self::extension_for_window(main_window)?].iter())
-            .copied()
-            .collect();
-
-        let required_instance_extensions = required_extensions
-            .iter()
-            .filter_map(|ext| match ext.type_ {
-                "instance" => Some(ext.name.as_ptr()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let info = vk::InstanceCreateInfo::builder()
-            .enabled_extension_names(&required_instance_extensions)
-            .flags(vk::InstanceCreateFlags::empty())
-            .application_info(&app_info);
-        const VALIDATION_LAYERS_NAME: &'static [*const std::ffi::c_char] =
-            &[bytemuck::must_cast_slice::<_, std::ffi::c_char>(
-                b"VK_LAYER_KHRONOS_validation".as_slice(),
-            )
-            .as_ptr()];
-        #[cfg(debug_assertions)]
-        let info = info.enabled_layer_names(&VALIDATION_LAYERS_NAME);
-
-        let instance = unsafe { entry.create_instance(&info, None) }?;
-
-        let device = Self::create_device(&instance, None)?;
-        Ok(Self {
-            required_extensions,
-            entry,
-            instance,
-            device: device.0,
-            graphics_queue: device.1,
-            transfer_queue: device.2,
-            active_state: None,
-            present_id: 0.into(),
-        })
-    }
-
-    pub fn get_active_state(&mut self) -> Option<&mut ActiveVulkanState> {
-        self.active_state.as_mut()
-    }
-
-    pub fn get_or_activate(&mut self) -> Result<&mut ActiveVulkanState> {
-        match self.active_state {
-            Some(_) => Ok(self.active_state.as_mut().unwrap()),
-            None => self.activate(),
-        }
-    }
-
-    pub fn activate(&mut self) -> Result<&mut ActiveVulkanState> {
-        let gfx_cmd_pool_create_info = vk::CommandPoolCreateInfo::builder()
-            .queue_family_index(self.graphics_queue.queue_family_index);
-        let xfer_cmd_pool_create_info = vk::CommandPoolCreateInfo::builder()
-            .queue_family_index(self.transfer_queue.queue_family_index);
-
-        let graphics_command_pool = unsafe {
-            self.device
-                .create_command_pool(&gfx_cmd_pool_create_info, None)
-        }?;
-        let transfer_command_pool = unsafe {
-            self.device
-                .create_command_pool(&xfer_cmd_pool_create_info, None)
-        }?;
-
-        let gfx_cmd_buf_alloc_info = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(graphics_command_pool)
-            .command_buffer_count(1)
-            .level(vk::CommandBufferLevel::PRIMARY);
-        let xfer_cmd_buf_alloc_info = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(transfer_command_pool)
-            .command_buffer_count(1)
-            .level(vk::CommandBufferLevel::PRIMARY);
-
-        let primary_graphics_command_buffer = unsafe {
-            self.device
-                .allocate_command_buffers(&gfx_cmd_buf_alloc_info)
-        }?[0];
-        let primary_transfer_command_buffer = unsafe {
-            self.device
-                .allocate_command_buffers(&xfer_cmd_buf_alloc_info)
-        }?[0];
-
-        if let Some(active_state) = &mut self.active_state {
-            unsafe {
-                self.device.device_wait_idle()?;
-                self.device
-                    .destroy_command_pool(active_state.graphics_command_pool, None);
-                self.device
-                    .destroy_command_pool(active_state.transfer_command_pool, None);
-            }
-        }
-
-        self.active_state = Some(ActiveVulkanState {
-            graphics_command_pool,
-            transfer_command_pool,
-            primary_graphics_command_buffer,
-            primary_transfer_command_buffer,
-        });
-        Ok(self.active_state.as_mut().unwrap())
-    }
-
-    fn extension_for_window(window: &RawWindowHandle) -> Result<vk::Extension, HexilError> {
-        match window {
-            RawWindowHandle::UiKit(_) => Ok(vk::EXT_METAL_SURFACE_EXTENSION),
-            RawWindowHandle::AppKit(_) => Ok(vk::EXT_METAL_SURFACE_EXTENSION),
-            RawWindowHandle::OhosNdk(_) => Ok(vk::OHOS_SURFACE_EXTENSION),
-            RawWindowHandle::Xlib(_) => Ok(vk::KHR_XLIB_SURFACE_EXTENSION),
-            RawWindowHandle::Xcb(_) => Ok(vk::KHR_XCB_SURFACE_EXTENSION),
-            RawWindowHandle::Wayland(_) => Ok(vk::KHR_WAYLAND_SURFACE_EXTENSION),
-            RawWindowHandle::Win32(_) => Ok(vk::KHR_WIN32_SURFACE_EXTENSION),
-            RawWindowHandle::AndroidNdk(_) => Ok(vk::KHR_ANDROID_SURFACE_EXTENSION),
-            _ => Err(HexilError::UnsupportedPlatform(Backtrace::capture())),
-        }
-    }
-
-    fn create_device(
-        instance: &Instance,
-        user_preferred_device: Option<UniqueVulkanId>,
-    ) -> Result<(Device, QueueWithInfo, QueueWithInfo)> {
-        let physical_device = Self::select_physical_device(instance, user_preferred_device)?;
-
-        let q_fam_props =
-            unsafe { instance.get_physical_device_queue_family_properties2(physical_device) };
-
-        let graphics_queue = q_fam_props
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                use std::cmp::Ordering::*;
-                match (
-                    a.queue_family_properties
-                        .queue_flags
-                        .contains(vk::QueueFlags::GRAPHICS),
-                    a.queue_family_properties
-                        .queue_flags
-                        .contains(vk::QueueFlags::TRANSFER),
-                    b.queue_family_properties
-                        .queue_flags
-                        .contains(vk::QueueFlags::GRAPHICS),
-                    b.queue_family_properties
-                        .queue_flags
-                        .contains(vk::QueueFlags::TRANSFER),
-                ) {
-                    (true, _, false, _) => Greater,
-                    (false, _, true, _) => Less,
-                    (true, true, true, false) => Less,
-                    (true, false, true, true) => Greater,
-                    _ => a
-                        .queue_family_properties
-                        .queue_count
-                        .cmp(&b.queue_family_properties.queue_count),
-                }
-            })
-            .map(|(idx, _)| idx)
-            .expect("At least one queue surely exists");
-        let transfer_queue = q_fam_props
-            .iter()
-            .enumerate()
-            .max_by(|(_, a), (_, b)| {
-                use std::cmp::Ordering::*;
-                match (
-                    a.queue_family_properties
-                        .queue_flags
-                        .contains(vk::QueueFlags::TRANSFER),
-                    a.queue_family_properties
-                        .queue_flags
-                        .contains(vk::QueueFlags::GRAPHICS),
-                    b.queue_family_properties
-                        .queue_flags
-                        .contains(vk::QueueFlags::TRANSFER),
-                    b.queue_family_properties
-                        .queue_flags
-                        .contains(vk::QueueFlags::GRAPHICS),
-                ) {
-                    (true, _, false, _) => Greater,
-                    (false, _, true, _) => Less,
-                    (true, true, true, false) => Less,
-                    (true, false, true, true) => Greater,
-                    _ => a
-                        .queue_family_properties
-                        .queue_count
-                        .cmp(&b.queue_family_properties.queue_count),
-                }
-            })
-            .map(|(idx, _)| idx)
-            .expect("At least one queue surely exists");
-
-        let gfx_queue_create_info = vk::DeviceQueueCreateInfo::builder()
-            .queue_family_index(graphics_queue.try_into().unwrap())
-            .queue_priorities(if graphics_queue == transfer_queue {
-                &[1.0, 0.9]
-            } else {
-                &[1.0]
-            });
-        let xfer_queue_create_info = vk::DeviceQueueCreateInfo::builder()
-            .queue_family_index(transfer_queue.try_into().unwrap())
-            .queue_priorities(&[0.9]);
-
-        let required_device_extensions = REQUIRED_EXTENSIONS
-            .iter()
-            .filter_map(|ext| match ext.type_ {
-                "device" => Some(ext.name.as_ptr()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-
-        let two_qs = [gfx_queue_create_info, xfer_queue_create_info];
-
-        let mut vulkan_1_1_features = vk::PhysicalDeviceVulkan11Features::builder()
-            .shader_draw_parameters(true)
-            .build();
-
-        let mut vulkan_1_2_features = vk::PhysicalDeviceVulkan12Features::builder()
-            .buffer_device_address(true)
-            .build();
-
-        let mut vulkan_1_3_features = vk::PhysicalDeviceVulkan13Features::builder()
-            .dynamic_rendering(true)
-            .inline_uniform_block(true)
-            .maintenance4(true)
-            .synchronization2(true)
-            .shader_demote_to_helper_invocation(true)
-            .shader_terminate_invocation(true)
-            .build();
-        let mut enabled_features = vk::PhysicalDeviceFeatures2::builder()
-            .push_next(&mut vulkan_1_3_features)
-            .features(vk::PhysicalDeviceFeatures::builder());
-        let device_create_info = vk::DeviceCreateInfo::builder()
-            .enabled_extension_names(&required_device_extensions)
-            .queue_create_infos(if graphics_queue == transfer_queue {
-                &two_qs.as_slice()[1..=1]
-            } else {
-                &two_qs.as_slice()
-            })
-            .push_next(&mut enabled_features);
-
-        let device = unsafe { instance.create_device(physical_device, &device_create_info, None) }?;
-        let gfx_q_info = vk::DeviceQueueInfo2::builder()
-            .queue_family_index(graphics_queue.try_into().unwrap())
-            .queue_index(0);
-        let gfx_q = unsafe { device.get_device_queue2(&gfx_q_info) };
-        let xfer_q_info = vk::DeviceQueueInfo2::builder()
-            .queue_family_index(transfer_queue.try_into().unwrap())
-            .queue_index(if graphics_queue == transfer_queue {
-                1
-            } else {
-                0
-            });
-        let xfer_q = unsafe { device.get_device_queue2(&xfer_q_info) };
-        Ok((
-            device,
-            QueueWithInfo {
-                queue: gfx_q,
-                queue_family_index: gfx_q_info.queue_family_index,
-                queue_index: gfx_q_info.queue_index,
-            },
-            QueueWithInfo {
-                queue: xfer_q,
-                queue_family_index: xfer_q_info.queue_family_index,
-                queue_index: xfer_q_info.queue_index,
-            },
-        ))
-    }
-
-    fn select_physical_device(
-        instance: &Instance,
-        user_preferred_device: Option<UniqueVulkanId>,
-    ) -> Result<vk::PhysicalDevice> {
-        let physical_devices = unsafe { instance.enumerate_physical_devices() }?;
-
-        let physical_devices_extension_properties = physical_devices
-            .iter()
-            .map(|p| unsafe { instance.enumerate_device_extension_properties(*p, None) })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let physical_devices_compatibility = physical_devices_extension_properties.iter().map(
-            |physical_device_supported_extensions| {
-                REQUIRED_EXTENSIONS
-                    .iter()
-                    .filter(|required_extension| required_extension.type_ == "device")
-                    .map(|required_device_extension| required_device_extension.name)
-                    .all(|req_dev_ext_name| {
-                        physical_device_supported_extensions
-                            .iter()
-                            .map(|physical_device_supported_extension_properties| {
-                                physical_device_supported_extension_properties.extension_name
-                            })
-                            .collect::<Vec<_>>()
-                            .contains(&req_dev_ext_name)
-                    })
-            },
-        );
-
-        let physical_devices: Vec<_> = physical_devices
-            .into_iter()
-            .zip(physical_devices_compatibility)
-            .filter_map(|(device, is_compatible)| if is_compatible { Some(device) } else { None })
-            .collect();
-
-        let mut physical_devices_properties =
-            Vec::<vk::PhysicalDeviceProperties2>::with_capacity(physical_devices.len());
-        let mut physical_devices_ids =
-            Vec::<vk::PhysicalDeviceIDProperties>::with_capacity(physical_devices.len());
-
-        physical_devices_properties
-            .spare_capacity_mut()
-            .fill_with(|| MaybeUninit::new(vk::PhysicalDeviceProperties2::builder().build()));
-        physical_devices_ids
-            .spare_capacity_mut()
-            .fill_with(|| MaybeUninit::new(vk::PhysicalDeviceIDProperties::builder().build()));
-        unsafe { physical_devices_properties.set_len(physical_devices.len()) };
-        unsafe { physical_devices_ids.set_len(physical_devices.len()) };
-
-        physical_devices_properties
-            .iter_mut()
-            .zip(physical_devices_ids.iter_mut())
-            .for_each(|(props, id)| {
-                *props = vk::PhysicalDeviceProperties2::builder()
-                    .push_next(id)
-                    .build();
-            });
-
-        physical_devices_properties
-            .iter_mut()
-            .zip(physical_devices.iter())
-            .for_each(|(props, dev)| unsafe {
-                instance.get_physical_device_properties2(*dev, props)
-            });
-
-        let selected_device: usize = match user_preferred_device {
-            None => None,
-            Some(UniqueVulkanId::LUID(id)) => physical_devices_ids.iter().position(|phys_dev_id| {
-                phys_dev_id.device_luid_valid == vk::TRUE && phys_dev_id.device_luid == id
-            }),
-            Some(UniqueVulkanId::UUID(id)) => physical_devices_ids
-                .iter()
-                .position(|phys_dev_id| phys_dev_id.device_uuid == id),
-        }
-        .unwrap_or_else(|| {
-            Self::default_physical_device_selection(physical_devices_properties.iter())
-        });
-
-        Ok(physical_devices[selected_device])
-    }
-
-    fn default_physical_device_selection<'a>(
-        physical_devices_properties: impl Iterator<Item = &'a vk::PhysicalDeviceProperties2>,
-    ) -> usize {
-        physical_devices_properties
-            .enumerate()
-            .filter(|(_, p)| p.properties.api_version >= vk::make_version(1, 4, 0))
-            .max_by_key(|(_, p)| p.properties.limits.max_compute_work_group_size)
-            .map(|(idx, _)| idx)
-            .expect("No compatible physical devices!")
     }
 }

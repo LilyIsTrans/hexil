@@ -9,7 +9,6 @@ pub mod all {
     pub use super::HexilEvent;
     pub use super::hexil_error::*;
     pub use super::vulkan_prelude::*;
-    pub use anyhow::Error;
     pub use anyhow::Result;
     pub use vulkanalia::vk;
 }
