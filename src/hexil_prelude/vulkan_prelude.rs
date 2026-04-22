@@ -14,6 +14,7 @@ pub const REQUIRED_EXTENSIONS: &'static [vulkanalia::vk::Extension] = &[
     vulkanalia::vk::KHR_PRESENT_ID2_EXTENSION,
     vulkanalia::vk::KHR_PRESENT_WAIT2_EXTENSION,
     vulkanalia::vk::KHR_SWAPCHAIN_MAINTENANCE1_EXTENSION,
+    vulkanalia::vk::KHR_SURFACE_MAINTENANCE1_EXTENSION,
     vulkanalia::vk::KHR_SWAPCHAIN_MUTABLE_FORMAT_EXTENSION,
 ];
 

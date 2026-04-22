@@ -24,7 +24,7 @@ proptest = "1.11.0"
 raw-window-handle = { version = "0.6.2", features = ["std"] }
 thiserror = "2.0.17"
 tracing = "0.1.44"
-vulkanalia = { version = "0.35.0", features = ["window", "libloading"] }
+vulkanalia = { version = "0.35.0", features = ["window", "libloading"], git = "file:///home/lily/dev/vulkanalia", branch = "407-fix" }
 winit = { version = "0.30.13", features = ["mint", "serde"] }
 
 
